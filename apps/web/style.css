@@ -476,6 +476,131 @@ select {
 .demo-actions { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
 .demo-result { border-left: 3px solid var(--status-success); }
 
+/* ==========================================================================
+   v0.3：图标 / 双语标题 / 关键内容分析 / 智能推荐 / Demo 预览
+   ========================================================================== */
+
+.ic { vertical-align: -3px; margin-right: var(--space-1); flex: none; }
+h2 .ic { color: var(--primary); }
+.en {
+  font-size: var(--text-xs);
+  color: var(--text-disabled);
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  margin-left: var(--space-1);
+  text-transform: none;
+  white-space: nowrap;
+}
+#nav a { display: inline-flex; align-items: center; gap: 2px; white-space: nowrap; }
+#nav .ic { width: 15px; height: 15px; margin-right: 4px; }
+/* 导航空间受限：英文只在页面标题/卡片出现，导航保留中文 */
+#nav a .en { display: none; }
+
+/* 推荐强度徽章 */
+.conf {
+  display: inline-block;
+  font-size: var(--text-xs);
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  color: var(--text-secondary);
+  vertical-align: 2px;
+}
+.conf-high { color: var(--status-success); border-color: var(--status-success); }
+.conf-medium { color: var(--status-warning); border-color: var(--status-warning); }
+.conf-low { color: var(--text-disabled); }
+
+/* 关键内容：镜头关键帧条 */
+.kc-strip {
+  display: flex;
+  gap: var(--space-3);
+  overflow-x: auto;
+  padding-bottom: var(--space-2);
+}
+.kc-shot {
+  flex: none;
+  width: 128px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--surface-base);
+}
+.kc-shot img { width: 100%; height: 72px; object-fit: cover; display: block; }
+.kc-noimg {
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-disabled);
+  background: var(--surface-raised);
+}
+.kc-meta {
+  display: flex;
+  justify-content: space-between;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+}
+.kc-type { color: var(--primary); font-weight: 500; }
+.kc-time { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.kc-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-6);
+  margin-top: var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.kc-facts .ic { color: var(--primary); }
+
+/* 维度卡片里的推荐理由 */
+.dim-reason {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.panel.inset {
+  margin-top: var(--space-4);
+  background: var(--surface-base);
+  border-style: dashed;
+}
+
+/* Demo 效果预览 */
+.preview-panel { border-left: 3px solid var(--primary); }
+.pv-dim {
+  margin: var(--space-6) 0 var(--space-3);
+  font-size: var(--text-h4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.pv-dim .ic { color: var(--primary); }
+.pv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: var(--space-3);
+}
+.pv-card {
+  display: flex;
+  gap: var(--space-3);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
+  padding: var(--space-3);
+}
+.pv-card.sample { display: block; }
+.pv-thumb {
+  width: 96px;
+  height: 64px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  flex: none;
+}
+.pv-opt { font-weight: 600; font-size: var(--text-sm); margin-bottom: var(--space-1); }
+.pv-effect { font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.55; }
+.pv-shots { font-size: var(--text-xs); color: var(--text-disabled); margin-top: var(--space-1); }
+.pv-combo { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(var(--space-3)); }
   to { opacity: 1; transform: translateY(0); }

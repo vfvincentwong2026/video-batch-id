@@ -12,6 +12,8 @@
  *   GET  /api/tasks/:id           任务详情（含变体进度）
  *   POST /api/tasks/:id/run       执行工作流 A（mock 链路：解析→采样→生成→双守卫→变体入库）
  *   POST /api/demo/run            Tunnel 演示入口：一键跑通端到端（选 Master→解析→建任务→执行）
+ *   GET  /api/assets/:id/analysis 关键内容分析 + 智能变量推荐（规则引擎 v1）
+ *   POST /api/preview             Demo 效果预览：矩阵每个选项的预期效果 + 关键帧 + 样例组合
  *   POST /api/variants/:id/review 审核标记 { outcome: 'good' | 'bad' }
  *   GET  /api/lineage/:masterId   谱系树（Master + 全部变体 + 审核状态）
  *   GET  /, /app.js, /style.css   静态工作台（apps/web，零构建）
@@ -26,7 +28,7 @@ import { readdir } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb, newId, type DatabaseSync } from './db.ts';
-import { createMatrix, estimateCost, enabledDimensions } from '@vbid/variable-matrix';
+import { createMatrix, estimateCost, enabledDimensions, suggestDimensions, buildPreview } from '@vbid/variable-matrix';
 import { getParser } from '@vbid/reference-parser';
 import { runWorkflowA } from '@vbid/pipeline';
 
@@ -224,6 +226,43 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
     return { summary, task: doneTask };
   });
 
+  // ---- 关键内容分析 + 智能变量推荐（工作流 A 第②步增强）----
+  route('GET', '/api/assets/:id/analysis', (ctx) => {
+    const asset = getAsset(ctx.params.id);
+    if (!asset || asset.kind !== 'master') return { __status: 404, error: 'master asset not found' };
+    const meta = JSON.parse(asset.meta_json as string) as { parse?: Record<string, unknown>; probe?: { hasAudio?: boolean } };
+    if (!meta.parse) return { __status: 409, error: 'asset not parsed yet; POST /api/assets/:id/parse first' };
+    const parsed = meta.parse as Parameters<typeof suggestDimensions>[0] & { shots: Array<{ description?: string }> };
+    const thumbs = extractThumbs(parsed.shots);
+    return {
+      parsedWith: parsed.parser,
+      keyContent: buildKeyContent(parsed, thumbs),
+      suggestions: suggestDimensions(parsed, { hasAudio: meta.probe?.hasAudio }),
+    };
+  });
+
+  // ---- Demo 效果预览（工作流 A 第④步：矩阵确定后、建任务前）----
+  route('POST', '/api/preview', (ctx) => {
+    const b = ctx.body as Record<string, unknown>;
+    const master = typeof b.master_asset_id === 'string' ? getAsset(b.master_asset_id) : null;
+    if (!master || master.kind !== 'master') {
+      return { __status: 400, error: 'valid master_asset_id is required' };
+    }
+    const meta = JSON.parse(master.meta_json as string) as { parse?: Record<string, unknown> };
+    if (!meta.parse) return { __status: 409, error: 'master not parsed yet' };
+    let matrix;
+    try {
+      matrix = Array.isArray(b.dimensions)
+        ? createMatrix(b.dimensions as Parameters<typeof createMatrix>[0])
+        : createMatrix();
+    } catch (e) {
+      return { __status: 400, error: `invalid dimensions: ${(e as Error).message}` };
+    }
+    const parsed = meta.parse as Parameters<typeof buildPreview>[1] & { shots: Array<{ description?: string }> };
+    const preview = buildPreview(matrix, parsed, { thumbs: extractThumbs(parsed.shots) });
+    return { preview, master: { id: master.id, filename: master.filename } };
+  });
+
   // ---- Tunnel 演示入口：一键跑通端到端（①②③⑤→谱系，演示/试用场景）----
   route('POST', '/api/demo/run', async (ctx) => {
     const b = ctx.body as Record<string, unknown>;
@@ -360,6 +399,43 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
   function getTask(id: string): Record<string, unknown> | null {
     const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Record<string, unknown> | undefined;
     return row ?? null;
+  }
+
+  /** 从镜头描述里抽取 [thumb=...] 关键帧引用 */
+  function extractThumbs(shots: Array<{ index: number; startMs?: number; endMs?: number; type?: string; description?: string }>) {
+    return shots.map((s) => {
+      const m = String(s.description ?? '').match(/\[thumb=([^\]]+)\]/);
+      return m ? { index: s.index, startMs: s.startMs ?? 0, endMs: s.endMs ?? 0, type: s.type, thumb: m[1] } : null;
+    }).filter((t): t is NonNullable<typeof t> => t !== null);
+  }
+
+  /** 关键内容分析：结构（镜头+Hook 位）、节奏、音频、最长/最短镜头热点 */
+  function buildKeyContent(
+    parsed: {
+      shots: Array<{ index: number; startMs: number; endMs: number; type: string; description?: string }>;
+      hooks: Array<{ phrase: string; kind: string }>;
+      bgm: { style: string; bpm: number | null };
+      rhythm: { shotCount: number; avgShotSec: number };
+      transcript: string;
+    },
+    thumbs: ReturnType<typeof extractThumbs>,
+  ) {
+    const thumbOf = new Map(thumbs.map((t) => [t.index, t.thumb]));
+    const sorted = [...parsed.shots].sort((a, b) => (b.endMs - b.startMs) - (a.endMs - a.startMs));
+    return {
+      structure: parsed.shots.map((s) => ({
+        index: s.index, type: s.type, startMs: s.startMs, endMs: s.endMs,
+        thumb: thumbOf.get(s.index),
+      })),
+      hooks: parsed.hooks,
+      rhythm: parsed.rhythm,
+      bgm: parsed.bgm,
+      transcript: parsed.transcript || null,
+      hotspots: {
+        longest: sorted[0] ? { shot: sorted[0].index, sec: Number(((sorted[0].endMs - sorted[0].startMs) / 1000).toFixed(1)) } : null,
+        shortest: sorted.length > 1 ? { shot: sorted[sorted.length - 1].index, sec: Number(((sorted[sorted.length - 1].endMs - sorted[sorted.length - 1].startMs) / 1000).toFixed(1)) } : null,
+      },
+    };
   }
 
   /** 解析 Master：真实文件走 ffmpeg-shotcut 并抽关键帧（每镜头 1 帧，上限 8）；否则按指定/mock provider */

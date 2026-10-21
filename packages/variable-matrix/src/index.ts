@@ -8,6 +8,10 @@
  *  - 完整实现六维数据模型与组合空间 / 采样 / 成本预估；
  *  - 默认仅启用「视觉 + 文案」两维，其余维度预置选项但默认关闭（v0.2+ 逐维打开）；
  *  - 纯函数、零依赖、可单测。
+ *
+ * v0.3 新增（智能匹配）：
+ *  - suggestDimensions：从解析产物启发式推荐维度启用与选项（规则引擎 v1；VLM 接入后升级语义匹配）；
+ *  - buildPreview：矩阵确定后生成「Demo 效果预览」（每个选项的预期效果 + 关联关键帧 + 样例变体）。
  */
 
 // ---------- 类型 ----------
@@ -27,7 +31,7 @@ export interface DimensionOption {
 }
 
 export interface Dimension {
-  key: DimensionKey;
+  key: DimensionKey | `custom-${string}`;
   /** 界面显示名（Bahasa Indonesia 运营友好，保留中文注释） */
   label: string;
   /** 是否参与变化：false = 整维锁定 */
@@ -270,4 +274,294 @@ export function estimateCost(
     ratePerVariantUsd,
     currency: 'USD',
   };
+}
+
+// ==========================================================================
+// v0.3 智能匹配：suggestDimensions（规则引擎 v1）
+// ==========================================================================
+
+/** 解析产物的最小输入结构（与 @vbid/reference-parser 的 ParsedReference 兼容，避免循环依赖） */
+export interface SuggestionParseInput {
+  shots: Array<{ index: number; startMs: number; endMs: number; type: string }>;
+  hooks: Array<{ phrase: string; kind: string }>;
+  bgm: { style: string; bpm: number | null };
+  rhythm: { shotCount: number; avgShotSec: number };
+  transcript: string;
+  parser: string;
+}
+
+export interface DimensionSuggestionReason {
+  key: string;
+  /** 为什么推荐这样配（给用户看的自然语言理由） */
+  reason: string;
+  /** 推荐强度：high=信号明确，medium=有信号，low=默认保守 */
+  confidence: 'high' | 'medium' | 'low';
+}
+
+export interface DimensionSuggestions {
+  dimensions: Dimension[];
+  reasons: DimensionSuggestionReason[];
+  /** 诚实声明：当前为规则引擎启发式；VLM 接入后升级为语义匹配 */
+  engine: 'rule-v1';
+}
+
+const SCENE_POOL = [
+  { id: 'scene-kitchen', label: '厨房台面' },
+  { id: 'scene-restaurant', label: '餐厅' },
+  { id: 'scene-outdoor', label: '户外野餐' },
+  { id: 'scene-office', label: '办公室' },
+  { id: 'scene-studio', label: '影棚' },
+  { id: 'scene-street', label: '街景' },
+];
+
+const COPY_FALLBACK = ['Hook=倾倒', 'Hook=拉丝', 'Hook=试吃', 'Hook=开盖'];
+
+/**
+ * 启发式维度推荐：
+ *  - 视觉：选项数与镜头数联动（镜头越多可用场景越多）；
+ *  - 文案：优先取解析出的视觉 Hook；不足补默认；
+ *  - 节奏：镜头密度高（avgShotSec ≤ 2.5 或 ≥6 镜头）→ 推荐启用；
+ *  - 音频：检测到音轨 → 推荐启用；
+ *  - 技术：解析器为真实 shotcut → 推荐启用（分辨率重映射是常见低成本变量）；
+ *  - 人物：无本地人脸/人物检测信号 → 保守不推荐（诚实标注，VLM 接入后点亮）。
+ */
+export function suggestDimensions(
+  parsed: SuggestionParseInput,
+  opts: { hasAudio?: boolean } = {},
+): DimensionSuggestions {
+  const dims = defaultDimensions();
+  const reasons: DimensionSuggestionReason[] = [];
+  const shotCount = parsed.shots.length;
+  const avgShotSec = parsed.rhythm?.avgShotSec ?? 0;
+
+  // 视觉：镜头数 → 场景选项数（2..6）
+  const visual = dims.find((d) => d.key === 'visual')!;
+  visual.options = SCENE_POOL.slice(0, Math.max(2, Math.min(6, shotCount || 2)));
+  reasons.push({
+    key: 'visual',
+    reason: `素材切出 ${shotCount} 个镜头 → 推荐 ${visual.options.length} 个场景变量（镜头越多，可安全替换的背景越多）`,
+    confidence: 'high',
+  });
+
+  // 文案：视觉 Hook 优先，不足补默认
+  const copy = dims.find((d) => d.key === 'copy')!;
+  const hookOpts = parsed.hooks
+    .filter((h) => h.kind === 'visual')
+    .map((h, i) => ({ id: `hook-${i + 1}`, label: `Hook=${h.phrase}` }));
+  while (hookOpts.length < 2) {
+    hookOpts.push({ id: `hook-fallback-${hookOpts.length + 1}`, label: COPY_FALLBACK[hookOpts.length] });
+  }
+  copy.options = hookOpts.slice(0, 4);
+  const realHooks = parsed.hooks.filter((h) => h.kind === 'visual').length;
+  reasons.push(realHooks > 0
+    ? { key: 'copy', reason: `解析出 ${realHooks} 个视觉 Hook → 文案变量围绕真实 Hook 生成`, confidence: 'high' }
+    : { key: 'copy', reason: '未解析出视觉 Hook → 使用默认 Hook 库（VLM 文案识别接入后改为真实 Hook）', confidence: 'low' });
+
+  // 节奏：密度信号
+  const rhythm = dims.find((d) => d.key === 'rhythm')!;
+  if (avgShotSec > 0 && (avgShotSec <= 2.5 || shotCount >= 6)) {
+    rhythm.enabled = true;
+    rhythm.options = [
+      { id: 'rhythm-keep', label: `保持原节奏（${avgShotSec}s/镜）` },
+      { id: 'rhythm-fast', label: '快切（密度 ×1.5）' },
+      { id: 'rhythm-slow', label: '慢节奏（密度 ×0.7）' },
+    ];
+    reasons.push({
+      key: 'rhythm',
+      reason: `镜头密度高（${shotCount} 镜 · 平均 ${avgShotSec}s/镜）→ 节奏是这条素材的高价值变量`,
+      confidence: 'medium',
+    });
+  } else {
+    rhythm.options = [
+      { id: 'rhythm-fast', label: '快切' },
+      { id: 'rhythm-slow', label: '慢节奏' },
+    ];
+    reasons.push({
+      key: 'rhythm',
+      reason: `镜头较疏（${shotCount} 镜 · 平均 ${avgShotSec}s/镜）→ 节奏变量收益不确定，默认锁定`,
+      confidence: 'low',
+    });
+  }
+
+  // 音频：音轨信号
+  const audio = dims.find((d) => d.key === 'audio')!;
+  const hasAudio = opts.hasAudio ?? parsed.bgm?.style !== '无声';
+  if (hasAudio) {
+    audio.enabled = true;
+    audio.options = [
+      { id: 'bgm-keep', label: `保持原声（${parsed.bgm?.style ?? '有音轨'}）` },
+      { id: 'bgm-folk', label: '印尼民谣' },
+      { id: 'bgm-pop', label: '流行' },
+    ];
+    reasons.push({
+      key: 'audio',
+      reason: `探测到音轨（${parsed.bgm?.style ?? '未知风格'}）→ 音频是低成本高感知变量`,
+      confidence: 'medium',
+    });
+  } else {
+    reasons.push({ key: 'audio', reason: '无声素材 → 音频变量默认锁定', confidence: 'high' });
+  }
+
+  // 技术：真实解析器产出 → 推荐
+  const technical = dims.find((d) => d.key === 'technical')!;
+  if (parsed.parser === 'ffmpeg-shotcut') {
+    technical.enabled = true;
+    reasons.push({
+      key: 'technical',
+      reason: '真实分辨率已探测 → 可安全做 720p/1080p 重映射（零生成成本预览档）',
+      confidence: 'medium',
+    });
+  } else {
+    reasons.push({ key: 'technical', reason: 'mock 解析无真实分辨率 → 默认锁定', confidence: 'low' });
+  }
+
+  // 人物：诚实占位
+  const person = dims.find((d) => d.key === 'person')!;
+  person.enabled = false;
+  reasons.push({
+    key: 'person',
+    reason: '本机无人物/人脸检测信号 → 保守锁定（VLM 接入后按出镜人物自动推荐）',
+    confidence: 'low',
+  });
+
+  return { dimensions: dims, reasons, engine: 'rule-v1' };
+}
+
+// ==========================================================================
+// v0.3 Demo 效果预览：buildPreview
+// ==========================================================================
+
+export interface PreviewShotRef {
+  index: number;
+  startMs: number;
+  endMs: number;
+  /** 关键帧 URL（可选） */
+  thumb?: string;
+  type?: string;
+}
+
+export interface PreviewEntry {
+  dimensionKey: string;
+  dimensionLabel: string;
+  optionId: string;
+  optionLabel: string;
+  /** 预期效果自然语言描述 */
+  effect: string;
+  /** 该选项主要影响哪些镜头 */
+  affectedShots: number[];
+  /** 关联关键帧（取影响镜头的首帧） */
+  thumb?: string;
+  /** 预览可信度：real 解析 > mock */
+  confidence: 'high' | 'medium' | 'low';
+}
+
+export interface PreviewSample {
+  id: string;
+  /** 人类可读的取值组合 */
+  combo: Array<{ dimension: string; value: string }>;
+}
+
+export interface PreviewResult {
+  entries: PreviewEntry[];
+  samples: PreviewSample[];
+  space: number;
+  engine: 'rule-v1';
+}
+
+/** 维度 key → 效果文案模板（按解析数据填充） */
+function effectText(
+  dim: Dimension,
+  optionLabel: string,
+  parsed: SuggestionParseInput,
+): { effect: string; confidence: PreviewEntry['confidence'] } {
+  const avg = parsed.rhythm?.avgShotSec ?? 0;
+  const shotCount = parsed.shots.length;
+  const real = parsed.parser === 'ffmpeg-shotcut';
+  switch (dim.key) {
+    case 'visual':
+      return {
+        effect: `背景场景替换为「${optionLabel}」：产品主体、关键动作与 Hook 镜头保持不变，仅环境/光线/构图随场景重生成`,
+        confidence: real ? 'high' : 'medium',
+      };
+    case 'copy':
+      return {
+        effect: `开屏 Hook 替换为「${optionLabel}」：镜头结构不变，前 ${Math.round((parsed.shots[0]?.endMs ?? 3000) / 1000)}s 的注意力抓手换文案重剪`,
+        confidence: real ? 'medium' : 'low',
+      };
+    case 'rhythm':
+      return {
+        effect: `剪辑节奏调整为「${optionLabel}」：当前 ${shotCount} 镜 · ${avg}s/镜，重映射后镜头密度改变、关键镜头顺序锁定`,
+        confidence: 'medium',
+      };
+    case 'audio':
+      return {
+        effect: `声音轨替换为「${optionLabel}」：画面不动，仅 BGM/音效层重混（零生成成本）`,
+        confidence: 'medium',
+      };
+    case 'person':
+      return {
+        effect: `出镜人物替换为「${optionLabel}」：动作与口型节奏迁移（LivePortrait/IP-Adapter，v0.3 后可用）`,
+        confidence: 'low',
+      };
+    case 'technical':
+      return {
+        effect: `导出规格切换为「${optionLabel}」：纯重编码，秒出预览档`,
+        confidence: 'high',
+      };
+    default:
+      return {
+        effect: `自定义变量「${dim.label}」取值为「${optionLabel}」：按生成 provider 的自由变量处理`,
+        confidence: 'low',
+      };
+  }
+}
+
+/**
+ * 生成 Demo 效果预览：
+ *  - 每个启用维度的每个选项一条 entry（预期效果 + 影响镜头 + 关键帧）；
+ *  - 选项按序映射到镜头（round-robin），让"变量 ↔ 画面"有具体对应；
+ *  - 附 3 条样例变体组合（最大差异度采样），让运营先看"会变出什么样的片子"。
+ */
+export function buildPreview(
+  matrix: VariableMatrix,
+  parsed: SuggestionParseInput,
+  opts: { thumbs?: Array<PreviewShotRef>; sampleCount?: number; seed?: number } = {},
+): PreviewResult {
+  validateMatrix(matrix);
+  const thumbs = opts.thumbs ?? [];
+  const thumbOf = (shotIndex: number): string | undefined => {
+    const hit = thumbs.find((t) => t.index === shotIndex);
+    return hit?.thumb;
+  };
+  const entries: PreviewEntry[] = [];
+  for (const dim of enabledDimensions(matrix)) {
+    dim.options.forEach((opt, i) => {
+      // 选项 → 镜头 round-robin 映射（1-based 镜头号）
+      const shotIdx = parsed.shots.length ? (i % parsed.shots.length) + 1 : undefined;
+      const { effect, confidence } = effectText(dim, opt.label, parsed);
+      entries.push({
+        dimensionKey: String(dim.key),
+        dimensionLabel: dim.label,
+        optionId: opt.id,
+        optionLabel: opt.label,
+        effect,
+        affectedShots: shotIdx ? [shotIdx] : [],
+        thumb: shotIdx ? thumbOf(shotIdx) : undefined,
+        confidence,
+      });
+    });
+  }
+
+  const samples = sampleVariants(matrix, Math.min(opts.sampleCount ?? 3, combinationSpace(matrix) || 1), opts.seed ?? 42)
+    .map((v) => ({
+      id: v.id,
+      combo: matrix.dimensions
+        .filter((d) => v.assignments[d.key] !== undefined)
+        .map((d) => ({
+          dimension: d.label,
+          value: d.options.find((o) => o.id === v.assignments[d.key])?.label ?? String(v.assignments[d.key]),
+        })),
+    }));
+
+  return { entries, samples, space: combinationSpace(matrix), engine: 'rule-v1' };
 }
