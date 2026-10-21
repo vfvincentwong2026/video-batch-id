@@ -1,0 +1,17 @@
+{
+  "name": "@vbid/pipeline",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "工作流 A 编排：解析 → 变量矩阵采样 → 逐变体生成 → 双守卫 → 谱系输出（provider 全部可替换）",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@vbid/variable-matrix": "workspace:*",
+    "@vbid/reference-parser": "workspace:*"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}
