@@ -1,0 +1,13 @@
+{
+  "name": "@vbid/media-probe",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "媒体探测：ffprobe/ffmpeg 封装（视频元数据、场景切分镜头检测、关键帧提取）。零 npm 依赖，二进制路径可配置",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}
