@@ -64,7 +64,7 @@ test('vlm-api：VLM 语义合并进解析产物（镜头描述/Hook/转录/BGM�
   assert.equal(r.hooks.length, 2);
   assert.equal(r.hooks[0].kind, 'verbal');
   assert.match(r.transcript, /Permen paling laris/);
-  assert.equal(r.bgm.style, '流行电子');
+  assert.equal(r.bgm.style, '视觉推断：流行电子');
   assert.equal(r.bgm.bpm, 128);
   // enrichment：VLM 点亮的维度进 real，不再 pending
   for (const k of ['shotcut', 'rhythm', 'probe', 'vlm-scene', 'vlm-copy', 'vlm-transcript', 'vlm-bgm']) {

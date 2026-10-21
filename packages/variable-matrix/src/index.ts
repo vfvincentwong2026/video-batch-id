@@ -343,19 +343,19 @@ export function suggestDimensions(
     confidence: 'high',
   });
 
-  // 文案：视觉 Hook 优先，不足补默认
+  // 文案：视觉/口播 Hook 都可用（VLM 常给出口播 Hook），不足补默认
   const copy = dims.find((d) => d.key === 'copy')!;
-  const hookOpts = parsed.hooks
-    .filter((h) => h.kind === 'visual')
-    .map((h, i) => ({ id: `hook-${i + 1}`, label: `Hook=${h.phrase}` }));
+  const usableHooks = parsed.hooks.filter((h) => h.kind === 'visual' || h.kind === 'verbal');
+  const hookOpts = usableHooks
+    .map((h, i) => ({ id: `hook-${i + 1}`, label: `${h.kind === 'verbal' ? '口播Hook' : 'Hook'}=${h.phrase}` }));
   while (hookOpts.length < 2) {
     hookOpts.push({ id: `hook-fallback-${hookOpts.length + 1}`, label: COPY_FALLBACK[hookOpts.length] });
   }
   copy.options = hookOpts.slice(0, 4);
-  const realHooks = parsed.hooks.filter((h) => h.kind === 'visual').length;
+  const realHooks = usableHooks.length;
   reasons.push(realHooks > 0
-    ? { key: 'copy', reason: `解析出 ${realHooks} 个视觉 Hook → 文案变量围绕真实 Hook 生成`, confidence: 'high' }
-    : { key: 'copy', reason: '未解析出视觉 Hook → 使用默认 Hook 库（VLM 文案识别接入后改为真实 Hook）', confidence: 'low' });
+    ? { key: 'copy', reason: `解析出 ${realHooks} 个 Hook（视觉/口播）→ 文案变量围绕真实 Hook 生成`, confidence: 'high' }
+    : { key: 'copy', reason: '未解析出 Hook → 使用默认 Hook 库（检查 VLM key 配置）', confidence: 'low' });
 
   // 节奏：密度信号
   const rhythm = dims.find((d) => d.key === 'rhythm')!;

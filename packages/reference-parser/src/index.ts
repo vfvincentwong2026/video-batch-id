@@ -161,10 +161,12 @@ export interface VlmParserOptions {
   apiKey?: string;
   /** OpenAI 兼容入口，默认 https://api.openai.com/v1；也可用中转（VBID_VLM_BASE_URL） */
   baseUrl?: string;
-  /** 默认 gpt-4o-mini（VBID_VLM_MODEL）： vision 能力 + 低成本 */
+  /** 默认 gpt-4o-mini（VBID_VLM_MODEL）： vision 能力 + 低成本；支持逗号分隔多模型回退链（429/402 时自动换下一个） */
   model?: string;
   /** 送 VLM 的最大代表帧数（受上下文与费用约束） */
   maxShots?: number;
+  /** 输出 token 上限（OpenRouter 免费额度敏感，默认压到 2048） */
+  maxTokens?: number;
   timeoutMs?: number;
   /** 测试注入：替代真实网络请求 */
   fetchFn?: typeof fetch;
@@ -202,15 +204,17 @@ export class VlmApiParserProvider implements ParserProvider {
     return {
       apiKey: this.opts.apiKey ?? process.env.VBID_VLM_API_KEY ?? '',
       baseUrl: (this.opts.baseUrl ?? process.env.VBID_VLM_BASE_URL ?? 'https://api.openai.com/v1').replace(/\/$/, ''),
-      model: this.opts.model ?? process.env.VBID_VLM_MODEL ?? 'gpt-4o-mini',
-      maxShots: this.opts.maxShots ?? 8,
+      // 支持逗号分隔回退链："model-a,model-b"（429/402/5xx 自动换下一个）
+      models: (this.opts.model ?? process.env.VBID_VLM_MODEL ?? 'gpt-4o-mini').split(',').map((s) => s.trim()).filter(Boolean),
+      maxShots: this.opts.maxShots ?? Number(process.env.VBID_VLM_MAX_SHOTS ?? 12),
+      maxTokens: this.opts.maxTokens ?? 2048,
       timeoutMs: this.opts.timeoutMs ?? 90000,
     };
   }
 
   async parse(input: ParseInput): Promise<ParsedReference> {
     if (!input.filePath) throw new Error('vlm-api requires filePath');
-    const { apiKey, baseUrl, model, maxShots, timeoutMs } = this.cfg();
+    const { apiKey, baseUrl, models, maxShots, maxTokens, timeoutMs } = this.cfg();
     if (!apiKey) throw new Error('VBID_VLM_API_KEY not set');
 
     const media = this.opts.mediaImpl ?? (await import('@vbid/media-probe'));
@@ -237,7 +241,7 @@ export class VlmApiParserProvider implements ParserProvider {
           frames.push(`data:image/jpeg;base64,${b64}`);
         } catch { /* 单帧失败不阻断 */ }
       }
-      analysis = await this.callVlm({ baseUrl, apiKey, model, timeoutMs, spans: shots, frames });
+      analysis = await this.callVlm({ baseUrl, apiKey, models, timeoutMs, maxTokens, spans: shots, frames });
     } finally {
       await fsp.rm(tmp, { recursive: true, force: true }).catch(() => {});
     }
@@ -261,7 +265,10 @@ export class VlmApiParserProvider implements ParserProvider {
     }
 
     const transcript = typeof analysis.transcript === 'string' ? analysis.transcript.trim() : '';
-    const bgmStyle = analysis.bgm?.style?.trim() || (probe.hasAudio ? '有音轨（VLM 未识别风格）' : '无声');
+    // 诚实标注：VLM 只看得到画面，BGM 风格/BPM 为视觉推断，不是听出来的
+    const bgmStyle = analysis.bgm?.style?.trim()
+      ? `视觉推断：${analysis.bgm.style.trim()}`
+      : (probe.hasAudio ? '有音轨（VLM 未识别风格，Whisper 接入后真实分析）' : '无声');
     const bpm = typeof analysis.bgm?.bpm === 'number' && analysis.bgm.bpm > 0 ? analysis.bgm.bpm : null;
 
     const real = ['shotcut', 'rhythm', 'probe', 'vlm-scene', 'vlm-copy'];
@@ -286,10 +293,38 @@ export class VlmApiParserProvider implements ParserProvider {
   }
 
   private async callVlm(args: {
-    baseUrl: string; apiKey: string; model: string; timeoutMs: number;
+    baseUrl: string; apiKey: string; models: string[]; timeoutMs: number; maxTokens: number;
     spans: Array<{ startMs: number; endMs: number }>; frames: string[];
   }): Promise<VlmAnalysisJson> {
     if (args.frames.length === 0) return {};
+    // 回退链：429（限流）/402（额度）/5xx（供应商故障）抛错换下一个；
+    // 200 但返回空/坏 JSON（模型听不懂图）也换下一个；全部耗尽时优雅回退 {}
+    let lastErr: Error | null = null;
+    let lastJson: VlmAnalysisJson = {};
+    for (const model of args.models) {
+      try {
+        const j = await this.callVlmOnce({ ...args, model });
+        lastJson = j;
+        if (!this.isEmptyAnalysis(j)) return j;
+      } catch (e) {
+        lastErr = e as Error;
+      }
+    }
+    if (lastErr && this.isEmptyAnalysis(lastJson)) throw lastErr; // 全部网络级失败
+    return lastJson; // 至少一次成功但内容为空 → 优雅回退（调用方用结构描述兜底）
+  }
+
+  /** VLM 返回是否为空分析（没有任何可用语义） */
+  private isEmptyAnalysis(j: VlmAnalysisJson): boolean {
+    const hasShotDesc = (j.shots ?? []).some((s) => s.description?.trim());
+    const hasHook = (j.hooks ?? []).some((h) => h.phrase?.trim());
+    return !hasShotDesc && !hasHook && !j.transcript?.trim() && !j.bgm?.style?.trim();
+  }
+
+  private async callVlmOnce(args: {
+    baseUrl: string; apiKey: string; model: string; timeoutMs: number; maxTokens: number;
+    spans: Array<{ startMs: number; endMs: number }>; frames: string[];
+  }): Promise<VlmAnalysisJson> {
     const boundaryText = args.spans
       .map((s, i) => `镜头${i + 1}: ${(s.startMs / 1000).toFixed(1)}s–${(s.endMs / 1000).toFixed(1)}s`)
       .join('，');
@@ -300,6 +335,7 @@ export class VlmApiParserProvider implements ParserProvider {
       body: JSON.stringify({
         model: args.model,
         temperature: 0.2,
+        max_tokens: args.maxTokens,
         messages: [
           { role: 'system', content: '你是印尼短视频电商素材分析器。根据用户给出的代表帧（按时间顺序）与镜头边界，输出严格 JSON，不要输出 JSON 以外的任何内容。' },
           {
