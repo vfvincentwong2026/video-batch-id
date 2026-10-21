@@ -1,0 +1,16 @@
+{
+  "name": "@vbid/reference-parser",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "参考视频解析层：Provider 抽象 + mock 实现（v0.1）；Qwen2.5-VL/Whisper 实装后置（T3 后续迭代）",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@vbid/variable-matrix": "workspace:*"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}

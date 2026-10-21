@@ -14,4 +14,10 @@ importers:
         specifier: workspace:*
         version: link:../../packages/variable-matrix
 
+  packages/reference-parser:
+    dependencies:
+      '@vbid/variable-matrix':
+        specifier: workspace:*
+        version: link:../variable-matrix
+
   packages/variable-matrix: {}
