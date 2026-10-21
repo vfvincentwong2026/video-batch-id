@@ -287,7 +287,7 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
     let freshlyParsed = false;
     if (master.status !== 'parsed') {
       await parseMaster(master, {
-        parser: master.file_path ? 'ffmpeg-shotcut' : 'mock',
+        parser: master.file_path ? (process.env.VBID_VLM_API_KEY ? 'vlm-api' : 'ffmpeg-shotcut') : 'mock',
         durationMs: Number(master.duration_ms ?? 0),
       });
       freshlyParsed = true;
@@ -444,7 +444,9 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
     opts: { parser?: string; filePath?: string; durationMs: number },
   ): Promise<{ parsed: Awaited<ReturnType<ReturnType<typeof getParser>['parse']>>; thumbs: number }> {
     const filePath = opts.filePath ?? (asset.file_path as string | null) ?? undefined;
-    const parserName = opts.parser ?? (filePath ? 'ffmpeg-shotcut' : 'mock');
+    // 有真实文件：配置了 VBID_VLM_API_KEY → vlm-api 语义解析；否则 ffmpeg-shotcut 结构解析；无文件 → mock
+    const parserName = opts.parser
+      ?? (filePath ? (process.env.VBID_VLM_API_KEY ? 'vlm-api' : 'ffmpeg-shotcut') : 'mock');
     const parser = getParser(parserName);
     const parsed = await parser.parse({
       assetId: asset.id as string,
@@ -454,7 +456,7 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
     });
 
     let thumbs = 0;
-    if (filePath && parserName === 'ffmpeg-shotcut') {
+    if (filePath && (parserName === 'ffmpeg-shotcut' || parserName === 'vlm-api')) {
       const media = await import('@vbid/media-probe');
       const outDir = join(DERIVED_ROOT, asset.id as string);
       mkdirSync(outDir, { recursive: true });
@@ -597,5 +599,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const { server } = createApp();
   server.listen(port, () => {
     console.log(`[vbid-api] listening on http://localhost:${port} (profile=${process.env.VBID_PROFILE ?? 'local'})`);
+    console.log(`[vbid-api] parser: ${process.env.VBID_VLM_API_KEY
+      ? `vlm-api (${process.env.VBID_VLM_MODEL ?? 'gpt-4o-mini'}, ${process.env.VBID_VLM_BASE_URL ?? 'https://api.openai.com/v1'})`
+      : 'ffmpeg-shotcut（设置 VBID_VLM_API_KEY 升级为 vlm-api 语义解析）'}`);
   });
 }

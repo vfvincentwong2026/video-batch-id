@@ -517,7 +517,7 @@ Bashdocker compose --profile tunnel --profile gpu up -d工作台可通过 https:
 
 
 
-变量说明默认值VBID_PROFILElocal / tunnel / cloudlocalVBID_STATE_BACKENDd1 或 sqliteTunnel 模式下为 d1VBID_ASSET_DIR素材存储目录./assetsVBID_VLM_MODEL参考解析用的 VLMQwen2.5-VL-7BVBID_GEN_MODEL变体生成主模型wan2.2-ti2v-5bVBID_FIDELITY_THRESHOLD保真守卫阈值0.92VBID_DEDUP_THRESHOLD去重守卫相似度阈值0.65VBID_INDEX_BACKENDsqlite-fts / pgvectorsqlite-ftsCLOUDFLARE_ACCOUNT_IDCloudflare 账户—CLOUDFLARE_D1_DATABASE_IDD1 数据库 ID—CLOUDFLARE_API_TOKEN具备 D1 读写权限的 API Token—CLOUDFLARE_TUNNEL_TOKENTunnel Token—完整参考见 docs/configuration.md。目录结构textvideo-batch-id/
+变量说明默认值VBID_PROFILElocal / tunnel / cloudlocalVBID_STATE_BACKENDd1 或 sqliteTunnel 模式下为 d1VBID_ASSET_DIR素材存储目录./assetsVBID_VLM_MODEL参考解析用的 VLM（vlm-api provider；OpenAI 兼容协议）gpt-4o-miniVBID_VLM_API_KEY启用 vlm-api 语义解析的 key（不设置则回退 ffmpeg-shotcut）—VBID_VLM_BASE_URLOpenAI 兼容入口（官方默认 / 中转 relay）https://api.openai.com/v1VBID_GEN_MODEL变体生成主模型wan2.2-ti2v-5bVBID_FIDELITY_THRESHOLD保真守卫阈值0.92VBID_DEDUP_THRESHOLD去重守卫相似度阈值0.65VBID_INDEX_BACKENDsqlite-fts / pgvectorsqlite-ftsCLOUDFLARE_ACCOUNT_IDCloudflare 账户—CLOUDFLARE_D1_DATABASE_IDD1 数据库 ID—CLOUDFLARE_API_TOKEN具备 D1 读写权限的 API Token—CLOUDFLARE_TUNNEL_TOKENTunnel Token—完整参考见 docs/configuration.md。目录结构textvideo-batch-id/
 ├── apps/
 │   ├── api/                 # 网关胶水：批量入口、分发、D1 状态
 │   └── web/                 # 运营工作台（解析、矩阵、审核、谱系）
