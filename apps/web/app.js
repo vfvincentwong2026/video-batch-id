@@ -266,6 +266,52 @@ async function renderLineage() {
   view.innerHTML = `<div class="panel"><h2>⑧ 素材谱系（哪个 Master 最值钱，一图看清）</h2>${parts.join('')}</div>`;
 }
 
+async function renderLibrary() {
+  const [value, all] = await Promise.all([
+    api('GET', '/api/masters/value'),
+    api('GET', '/api/library'),
+  ]);
+  view.innerHTML = `
+    <div class="panel">
+      <h2>Master 价值榜（哪个 Master 最值钱）</h2>
+      ${value.masters.length ? `<table><tr><th>#</th><th>Master</th><th>变体</th><th>守卫通过</th><th>👍/👎</th><th>好评率</th><th>价值分</th></tr>
+      ${value.masters.map((m, i) => `<tr>
+        <td>${i + 1}</td><td>${esc(m.master.filename)}</td><td>${m.variantCount}</td>
+        <td>${m.acceptedCount}</td><td>${m.goodCount} / ${m.badCount}</td>
+        <td>${m.passRate === null ? '—' : Math.round(m.passRate * 100) + '%'}</td>
+        <td><strong>${m.valueScore}</strong></td>
+      </tr>`).join('')}</table>` : '<p class="muted">暂无 Master。</p>'}
+    </div>
+    <div class="panel">
+      <h2>素材库检索</h2>
+      <div class="form-row" style="grid-template-columns: 2fr 1fr 1fr auto">
+        <div><label>关键词（文件名/描述/变量取值）</label><input id="lib-q" placeholder="如：餐厅、Hook=拉丝、V02"></div>
+        <div><label>类型</label><select id="lib-kind"><option value="">全部</option><option value="master">Master</option><option value="variant">变体</option></select></div>
+        <div><label>状态</label><select id="lib-status"><option value="">全部</option><option value="accepted">通过守卫</option><option value="rejected">被拦截</option><option value="parsed">已解析</option></select></div>
+        <button id="lib-search">搜索</button>
+      </div>
+      <div id="lib-result" style="margin-top:14px"></div>
+    </div>`;
+
+  async function doSearch() {
+    const q = encodeURIComponent(document.getElementById('lib-q').value.trim());
+    const kind = document.getElementById('lib-kind').value;
+    const status = document.getElementById('lib-status').value;
+    const r = await api('GET', `/api/library?q=${q}&kind=${kind}&status=${status}`);
+    document.getElementById('lib-result').innerHTML = r.assets.length
+      ? `<table><tr><th>资产</th><th>类型</th><th>状态</th><th>审核</th><th>说明</th></tr>
+        ${r.assets.map((a) => {
+          const meta = JSON.parse(a.meta_json || '{}');
+          return `<tr><td>${esc(a.filename)}</td><td>${a.kind}</td><td>${badge(a.status)}</td>
+            <td>${a.review === 1 ? '👍' : a.review === 0 ? '👎' : '—'}</td>
+            <td class="muted">${esc(meta.descriptor || meta.note || '')}</td></tr>`;
+        }).join('')}</table>`
+      : '<p class="muted">没有匹配结果。</p>';
+  }
+  document.getElementById('lib-search').onclick = () => doSearch().catch((e) => toast(e.message, true));
+  doSearch().catch(() => {});
+}
+
 // ---------- 路由 ----------
 
 const routes = {
@@ -275,6 +321,7 @@ const routes = {
   queue: renderQueue,
   review: renderReview,
   lineage: renderLineage,
+  library: renderLibrary,
 };
 
 async function route() {

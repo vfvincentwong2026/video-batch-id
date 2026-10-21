@@ -248,6 +248,51 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
     };
   });
 
+  // ---- 素材库检索（v0.1 用 LIKE；FTS5 索引后置，接口不变）----
+  route('GET', '/api/library', (ctx, req) => {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const q = url.searchParams.get('q')?.trim();
+    const kind = url.searchParams.get('kind');
+    const status = url.searchParams.get('status');
+    let sql = 'SELECT * FROM assets WHERE 1=1';
+    const args: string[] = [];
+    if (kind === 'master' || kind === 'variant') { sql += ' AND kind = ?'; args.push(kind); }
+    if (status) { sql += ' AND status = ?'; args.push(status); }
+    if (q) { sql += ' AND (filename LIKE ? OR meta_json LIKE ?)'; args.push(`%${q}%`, `%${q}%`); }
+    sql += ' ORDER BY created_at DESC LIMIT 200';
+    return { assets: db.prepare(sql).all(...args) };
+  });
+
+  // ---- Master 价值榜（知识层 v0.1-lite：哪个 Master 最值钱）----
+  route('GET', '/api/masters/value', () => {
+    const masters = db.prepare(`SELECT * FROM assets WHERE kind = 'master' ORDER BY created_at DESC`).all();
+    const ranked = (masters as Array<Record<string, unknown>>).map((m) => {
+      const stats = db.prepare(
+        `SELECT COUNT(*) AS total,
+                SUM(CASE WHEN status = 'accepted' THEN 1 ELSE 0 END) AS accepted,
+                SUM(CASE WHEN review = 1 THEN 1 ELSE 0 END) AS good,
+                SUM(CASE WHEN review = 0 THEN 1 ELSE 0 END) AS bad
+         FROM assets WHERE parent_id = ?`,
+      ).get(m.id as string) as Record<string, number>;
+      const total = stats.total ?? 0;
+      const good = stats.good ?? 0;
+      const accepted = stats.accepted ?? 0;
+      // v0.1 价值分：产出×0.3 + 好评×0.5 + 通过率×0.2（0..1 归一前的原始加权，排序用）
+      const valueScore = Number((total * 0.3 + good * 0.5 + (total ? (accepted / total) * 10 : 0) * 0.2).toFixed(2));
+      return {
+        master: m,
+        variantCount: total,
+        acceptedCount: accepted,
+        goodCount: good,
+        badCount: stats.bad ?? 0,
+        passRate: total ? Number((accepted / total).toFixed(2)) : null,
+        valueScore,
+      };
+    });
+    ranked.sort((a, b) => b.valueScore - a.valueScore);
+    return { masters: ranked };
+  });
+
   // ---- 审核 ----
   route('POST', '/api/variants/:id/review', (ctx) => {
     const b = ctx.body as Record<string, unknown>;
