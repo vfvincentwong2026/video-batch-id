@@ -1,0 +1,10 @@
+{
+  "name": "video-batch-id",
+  "version": "0.1.0",
+  "private": true,
+  "description": "让一条好素材，安全地变成一百条好素材 —— 印尼短视频电商二创平台",
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20"
+  }
+}

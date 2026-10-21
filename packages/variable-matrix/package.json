@@ -1,0 +1,13 @@
+{
+  "name": "@vbid/variable-matrix",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "六维变量矩阵：组合空间计算、最大差异度采样、成本预估（v0.1 核心逻辑）",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}
