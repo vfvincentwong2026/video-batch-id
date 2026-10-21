@@ -6,17 +6,26 @@
  *   POST /api/assets              登记资产（Master 上传 / 变体入库）
  *   GET  /api/assets              资产列表（?kind=master|variant&parent_id=）
  *   GET  /api/assets/:id          资产详情
+ *   POST /api/assets/:id/parse    运行参考解析（provider 可指定，默认 mock）
  *   POST /api/tasks               创建生成任务（masterAssetId + 矩阵 + 变体数 → 预估成本）
  *   GET  /api/tasks               任务列表
  *   GET  /api/tasks/:id           任务详情（含变体进度）
+ *   POST /api/tasks/:id/run       执行工作流 A（mock 链路：解析→采样→生成→双守卫→变体入库）
  *   POST /api/variants/:id/review 审核标记 { outcome: 'good' | 'bad' }
+ *   GET  /api/lineage/:masterId   谱系树（Master + 全部变体 + 审核状态）
+ *   GET  /, /app.js, /style.css   静态工作台（apps/web，零构建）
  *
- * 设计约束：状态推进放在 worker（T3/T4），本服务只做 REST + 状态读写，保持可替换为 D1。
+ * 设计约束：状态推进由 pipeline 包驱动，本服务做 REST + 状态读写，保持可替换为 D1。
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { readFile } from 'node:fs/promises';
+import { extname, join, normalize } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { openDb, newId, type DatabaseSync } from './db.ts';
 import { createMatrix, estimateCost, enabledDimensions } from '@vbid/variable-matrix';
+import { getParser } from '@vbid/reference-parser';
+import { runWorkflowA } from '@vbid/pipeline';
 
 interface Ctx {
   db: DatabaseSync;
@@ -146,6 +155,99 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
     return { task, variants };
   });
 
+  // ---- 参考解析（工作流 A 第②步）----
+  route('POST', '/api/assets/:id/parse', async (ctx) => {
+    const asset = getAsset(ctx.params.id);
+    if (!asset || asset.kind !== 'master') return { __status: 404, error: 'master asset not found' };
+    const b = ctx.body as Record<string, unknown>;
+    const parser = getParser(typeof b.parser === 'string' ? b.parser : 'mock');
+    const durationMs = Number(asset.duration_ms ?? b.duration_ms ?? 0);
+    if (!Number.isFinite(durationMs) || durationMs <= 0) {
+      return { __status: 400, error: 'asset has no duration_ms; pass it in body' };
+    }
+    const parsed = await parser.parse({
+      assetId: asset.id as string,
+      filename: asset.filename as string,
+      durationMs,
+    });
+    db.prepare(`UPDATE assets SET status = 'parsed', meta_json = ? WHERE id = ?`).run(
+      JSON.stringify({ ...(JSON.parse(asset.meta_json as string) as object), parse: parsed }),
+      asset.id as string,
+    );
+    return { parsed };
+  });
+
+  // ---- 任务执行（工作流 A 第⑤–⑦步，mock 链路同步执行）----
+  route('POST', '/api/tasks/:id/run', async (ctx) => {
+    const task = getTask(ctx.params.id);
+    if (!task) return { __status: 404, error: 'task not found' };
+    if (task.status === 'done') return { __status: 409, error: 'task already run' };
+    const master = getAsset(task.master_asset_id as string);
+    if (!master) return { __status: 404, error: 'master asset missing' };
+    const matrix = createMatrix(JSON.parse(task.matrix_json as string).dimensions);
+    const b = ctx.body as Record<string, unknown>;
+    const seed = Number.isFinite(Number(b.seed)) ? Number(b.seed) : 42;
+
+    db.prepare(`UPDATE tasks SET status = 'generating' WHERE id = ?`).run(task.id as string);
+    const result = await runWorkflowA({
+      masterAssetId: master.id as string,
+      masterFilename: master.filename as string,
+      durationMs: Number(master.duration_ms ?? 11000),
+      variantCount: Number(task.variant_count),
+      seed,
+      dimensions: matrix.dimensions,
+    }, {
+      onVariant: (v) => {
+        const vid = newId('var');
+        db.prepare(
+          `INSERT INTO assets (id, kind, filename, parent_id, task_id, status, meta_json, review)
+           VALUES (?, 'variant', ?, ?, ?, ?, ?, NULL)`,
+        ).run(
+          vid, `${v.spec.id}.mp4`, master.id as string, task.id as string,
+          v.accepted ? 'accepted' : 'rejected',
+          JSON.stringify({
+            spec: v.spec,
+            fileRef: v.generated.fileRef,
+            descriptor: v.generated.descriptor,
+            fingerprint: v.generated.fingerprint,
+            guards: { fidelity: v.fidelity, dedup: v.dedup },
+          }),
+        );
+      },
+    });
+    db.prepare(`UPDATE tasks SET status = 'done' WHERE id = ?`).run(task.id as string);
+    return {
+      summary: {
+        requestedCount: Number(task.variant_count),
+        variantCount: result.variants.length,
+        // 组合空间耗尽时按空间上限产出（README 语义：变体数 ≤ 组合空间）
+        spaceCapped: result.variants.length < Number(task.variant_count),
+        acceptedCount: result.acceptedCount,
+        rejectedCount: result.rejectedCount,
+        estimatedCostUsd: result.cost.estimatedCostUsd,
+      },
+      task: getTask(task.id as string),
+    };
+  });
+
+  // ---- 谱系（工作流 A 第⑧步视图数据）----
+  route('GET', '/api/lineage/:masterId', (ctx) => {
+    const master = getAsset(ctx.params.masterId);
+    if (!master || master.kind !== 'master') return { __status: 404, error: 'master not found' };
+    const variants = db.prepare(
+      'SELECT id, filename, task_id, status, review, meta_json, created_at FROM assets WHERE parent_id = ? ORDER BY created_at',
+    ).all(master.id as string);
+    return {
+      master,
+      variants: variants.map((v) => {
+        const row = v as Record<string, unknown>;
+        let meta: Record<string, unknown> = {};
+        try { meta = JSON.parse(row.meta_json as string) as Record<string, unknown>; } catch { /* 容忍坏 json */ }
+        return { ...row, meta };
+      }),
+    };
+  });
+
   // ---- 审核 ----
   route('POST', '/api/variants/:id/review', (ctx) => {
     const b = ctx.body as Record<string, unknown>;
@@ -186,6 +288,27 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
         json(res, 500, { error: (e as Error).message });
       }
       return;
+    }
+    // 静态工作台（apps/web）：非 /api、非 /healthz 的 GET 请求尝试按文件服务
+    if (method === 'GET' && !pathname.startsWith('/api') && pathname !== '/healthz') {
+      const webRoot = fileURLToPath(new URL('../../web/', import.meta.url));
+      const rel = pathname === '/' ? 'index.html' : normalize(pathname).replace(/^([/\\])+/, '');
+      const filePath = normalize(join(webRoot, rel));
+      if (!filePath.startsWith(normalize(webRoot))) { json(res, 403, { error: 'forbidden' }); return; }
+      try {
+        const content = await readFile(filePath);
+        const types: Record<string, string> = {
+          '.html': 'text/html; charset=utf-8',
+          '.js': 'text/javascript; charset=utf-8',
+          '.css': 'text/css; charset=utf-8',
+        };
+        res.writeHead(200, { 'content-type': types[extname(filePath)] ?? 'application/octet-stream' });
+        res.end(content);
+        return;
+      } catch {
+        json(res, 404, { error: 'not found' });
+        return;
+      }
     }
     json(res, 404, { error: 'not found' });
   });

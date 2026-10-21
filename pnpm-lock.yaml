@@ -10,6 +10,12 @@ importers:
 
   apps/api:
     dependencies:
+      '@vbid/pipeline':
+        specifier: workspace:*
+        version: link:../../packages/pipeline
+      '@vbid/reference-parser':
+        specifier: workspace:*
+        version: link:../../packages/reference-parser
       '@vbid/variable-matrix':
         specifier: workspace:*
         version: link:../../packages/variable-matrix

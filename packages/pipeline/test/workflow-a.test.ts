@@ -78,15 +78,22 @@ test('启发式去重守卫：无前驱时必通过；分數越界拦截', async
     parsed: { assetId: 'm', durationMs: 1000, shots: [], hooks: [], transcript: '', bgm: { style: '', bpm: null }, rhythm: { shotCount: 0, avgShotSec: 0 }, parser: 'mock' },
     matrix: { dimensions: [{ key: 'visual', label: '视觉', enabled: true, options: [{ id: 'a', label: 'a' }, { id: 'b', label: 'b' }], locked: [] }] },
   };
-  const noPred = await guard.check(base, { fileRef: 'mock://x', descriptor: '', generator: 'mock' }, []);
+  const noPred = await guard.check(base, { fileRef: 'mock://x', descriptor: '', fingerprint: '[["visual","a"]]', generator: 'mock' }, []);
   assert.equal(noPred.passed, true);
 
-  // 相同 fileRef 的前驱 → 相似度 1.0 → 拦截
-  const cloned = await guard.check(base, { fileRef: 'mock://x', descriptor: '', generator: 'mock' }, [
-    { fileRef: 'mock://x', descriptor: '', generator: 'mock' },
+  // 相同指纹的前驱 → 重合度 1.0 → 拦截
+  const cloned = await guard.check(base, { fileRef: 'mock://x', descriptor: '', fingerprint: '[["visual","a"]]', generator: 'mock' }, [
+    { fileRef: 'mock://y', descriptor: '', fingerprint: '[["visual","a"]]', generator: 'mock' },
   ]);
   assert.equal(cloned.passed, false);
   assert.equal(cloned.score, 1);
+
+  // 不同取值的前驱 → 重合度 0 → 通过
+  const different = await guard.check(base, { fileRef: 'mock://x', descriptor: '', fingerprint: '[["visual","a"]]', generator: 'mock' }, [
+    { fileRef: 'mock://y', descriptor: '', fingerprint: '[["visual","b"]]', generator: 'mock' },
+  ]);
+  assert.equal(different.passed, true);
+  assert.equal(different.score, 0);
 });
 
 test('启发式保真守卫：锁定核心越多分越高，阈值 0.92', async () => {

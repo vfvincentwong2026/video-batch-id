@@ -5,7 +5,9 @@
   "type": "module",
   "description": "网关胶水：资产/任务 REST + SQLite 状态层（D1 后置，PM 裁决 v0.1 用本地 SQLite）",
   "dependencies": {
-    "@vbid/variable-matrix": "workspace:*"
+    "@vbid/variable-matrix": "workspace:*",
+    "@vbid/reference-parser": "workspace:*",
+    "@vbid/pipeline": "workspace:*"
   },
   "scripts": {
     "start": "node src/server.ts",

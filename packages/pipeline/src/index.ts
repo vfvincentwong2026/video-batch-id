@@ -42,6 +42,8 @@ export interface GeneratedVariant {
   fileRef: string;
   /** 生成描述（prompt 摘要），便于审核页展示 */
   descriptor: string;
+  /** 结构指纹：启发式守卫的相似度比较基础。mock = 变量取值序列化；真实实现 = pHash/embedding 向量摘要 */
+  fingerprint: string;
   generator: string;
 }
 
@@ -67,6 +69,9 @@ export class MockGeneratorProvider implements VariantGeneratorProvider {
     return {
       fileRef: `mock://variants/${variant.id}-${hash}.mp4`,
       descriptor,
+      fingerprint: JSON.stringify(
+        Object.entries(variant.assignments).sort(([a], [b]) => a.localeCompare(b)),
+      ),
       generator: this.name,
     };
   }
@@ -127,7 +132,7 @@ export class HeuristicFidelityGuard implements FidelityGuard {
 }
 
 /**
- * v0.1 启发式去重守卫：以变量取值的重合度估算相似度。
+ * v0.1 启发式去重守卫：比较变体指纹在启用维度上的取值重合度。
  * 真实实现（pHash + 关键帧 CLIP 距离 + 音频指纹）后置。
  */
 export class HeuristicDedupGuard implements DedupGuard {
@@ -140,16 +145,18 @@ export class HeuristicDedupGuard implements DedupGuard {
     }
     let worst = 0;
     for (const pred of predecessors) {
-      // 从描述还原前驱取值不可行 → 用 fileRef 差异位 + 序位估算（mock 语义）
-      const sameBits = [...generated.fileRef].filter((c, i) => pred.fileRef[i] === c).length;
-      const sim = sameBits / Math.max(generated.fileRef.length, pred.fileRef.length);
-      worst = Math.max(worst, sim);
+      // 指纹为变量取值 JSON：重合度 = 取值相同的启用维度占比
+      let predAssignments: Record<string, unknown> = {};
+      try { predAssignments = Object.fromEntries(JSON.parse(pred.fingerprint) as Array<[string, unknown]>); } catch { /* 容忍 */ }
+      const cur = Object.fromEntries(JSON.parse(generated.fingerprint) as Array<[string, unknown]>);
+      const overlap = keys.filter((k) => predAssignments[k] === cur[k]).length / keys.length;
+      worst = Math.max(worst, overlap);
     }
     const score = Number(worst.toFixed(3));
     return {
       passed: score < DEDUP_THRESHOLD,
       score,
-      detail: `worst-similarity vs ${predecessors.length} predecessors`,
+      detail: `worst-overlap vs ${predecessors.length} predecessors`,
     };
   }
 }
