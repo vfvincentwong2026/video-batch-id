@@ -228,6 +228,14 @@ async function renderMatrix() {
 async function renderQueue() {
   const { tasks } = await api('GET', '/api/tasks');
   view.innerHTML = `
+    <div class="panel demo-panel">
+      <h2>🚀 一键演示 · 跑通端到端</h2>
+      <p class="muted">自动选一条未跑过的真实 Master：<strong>ffmpeg-shotcut 镜头切分 + 关键帧</strong> → 变量矩阵采样 → 生成 → 双守卫 → 谱系入库。秒级看完全链路，无需任何配置。</p>
+      <div class="demo-actions">
+        <button id="btn-demo">▶ 一键跑通端到端</button>
+        <span id="demo-status" class="muted" role="status" aria-live="polite"></span>
+      </div>
+    </div>
     <div class="panel">
       <h2>⑤ 任务队列</h2>
       ${tasks.length ? `<table><tr><th>任务</th><th>Master</th><th>变体数</th><th>预估成本</th><th>状态</th><th></th></tr>
@@ -235,9 +243,35 @@ async function renderQueue() {
         <td>${esc(t.id)}</td><td>${esc(t.master_asset_id)}</td><td>${t.variant_count}</td><td>$${t.estimated_cost_usd}</td>
         <td>${badge(t.status)}</td>
         <td>${t.status === 'queued' ? `<button class="small" data-run="${t.id}">▶ 生成</button>` : ''}</td>
-      </tr>`).join('')}</table>` : '<p class="muted">队列为空，到 <a href="#/matrix">③ 变量矩阵</a> 创建任务。</p>'}
+      </tr>`).join('')}</table>` : '<p class="muted">队列为空，到 <a href="#/matrix">③ 变量矩阵</a> 创建任务，或点上方「一键演示」。</p>'}
     </div>
     <div id="run-result"></div>`;
+  document.getElementById('btn-demo').onclick = async () => {
+    const btn = document.getElementById('btn-demo');
+    const status = document.getElementById('demo-status');
+    btn.disabled = true;
+    btn.textContent = '运行中…';
+    status.textContent = '解析 → 采样 → 生成 → 守卫 → 入库，请稍候';
+    try {
+      const r = await api('POST', '/api/demo/run', {});
+      const cap = r.summary.spaceCapped ? `（组合空间 ${r.summary.variantCount} 种 < 请求 ${r.summary.requestedCount}，按上限产出）` : '';
+      toast(`演示完成：通过 ${r.summary.acceptedCount} · 拦截 ${r.summary.rejectedCount}`);
+      status.textContent = '';
+      await renderQueue(); // 先刷新队列，再写结果面板（避免被重渲染冲掉）
+      document.getElementById('run-result').innerHTML = `
+        <div class="panel demo-result">
+          <h2>✅ 演示完成</h2>
+          <p>Master：<strong>${esc(r.master.filename)}</strong>${r.freshlyParsed ? ' · 已完成真实解析（镜头 + 关键帧）' : ' · 复用已有解析'}</p>
+          <p>任务 ${esc(r.task.id)}：产出 <strong>${r.summary.variantCount}</strong> 条变体${cap} · 守卫通过 <strong>${r.summary.acceptedCount}</strong> · 拦截 <strong>${r.summary.rejectedCount}</strong> · 预估 $${r.summary.estimatedCostUsd}</p>
+          <p><a class="btn-link" href="#/review">⑥ 去审核 👍/👎 →</a> <a class="btn-link" href="#/lineage">⑧ 看谱系 →</a></p>
+        </div>`;
+    } catch (e) {
+      toast(e.message, true);
+      status.textContent = '';
+    }
+    btn.disabled = false;
+    btn.textContent = '▶ 一键跑通端到端';
+  };
   document.querySelectorAll('[data-run]').forEach((btn) => {
     btn.onclick = async () => {
       btn.disabled = true;

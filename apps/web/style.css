@@ -465,6 +465,17 @@ select {
 .toast.err { border-left-color: var(--status-error); }
 .toast.warn { border-left-color: var(--status-warning); }
 
+/* ==========================================================================
+   演示面板（Tunnel 演示入口）
+   ========================================================================== */
+
+.demo-panel {
+  border: 1px solid var(--primary);
+  background: linear-gradient(135deg, var(--primary-soft), transparent 55%);
+}
+.demo-actions { display: flex; align-items: center; gap: var(--space-4); flex-wrap: wrap; }
+.demo-result { border-left: 3px solid var(--status-success); }
+
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(var(--space-3)); }
   to { opacity: 1; transform: translateY(0); }

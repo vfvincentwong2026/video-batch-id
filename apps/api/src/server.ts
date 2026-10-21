@@ -11,6 +11,7 @@
  *   GET  /api/tasks               任务列表
  *   GET  /api/tasks/:id           任务详情（含变体进度）
  *   POST /api/tasks/:id/run       执行工作流 A（mock 链路：解析→采样→生成→双守卫→变体入库）
+ *   POST /api/demo/run            Tunnel 演示入口：一键跑通端到端（选 Master→解析→建任务→执行）
  *   POST /api/variants/:id/review 审核标记 { outcome: 'good' | 'bad' }
  *   GET  /api/lineage/:masterId   谱系树（Master + 全部变体 + 审核状态）
  *   GET  /, /app.js, /style.css   静态工作台（apps/web，零构建）
@@ -199,43 +200,16 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
     const asset = getAsset(ctx.params.id);
     if (!asset || asset.kind !== 'master') return { __status: 404, error: 'master asset not found' };
     const b = ctx.body as Record<string, unknown>;
-    const filePath = (asset.file_path as string | null) ?? (typeof b.file_path === 'string' ? b.file_path : undefined);
-    // 有真实文件 → 默认 shotcut 真实解析；否则 mock
-    const parserName = typeof b.parser === 'string' ? b.parser : filePath ? 'ffmpeg-shotcut' : 'mock';
-    const parser = getParser(parserName);
     const durationMs = Number(asset.duration_ms ?? b.duration_ms ?? 0);
     if (!Number.isFinite(durationMs) || durationMs <= 0) {
       return { __status: 400, error: 'asset has no duration_ms; pass it in body' };
     }
-    const parsed = await parser.parse({
-      assetId: asset.id as string,
-      filename: asset.filename as string,
-      durationMs,
+    const filePath = (asset.file_path as string | null) ?? (typeof b.file_path === 'string' ? b.file_path : undefined);
+    const { parsed, thumbs } = await parseMaster(asset, {
+      parser: typeof b.parser === 'string' ? b.parser : undefined,
       filePath,
+      durationMs,
     });
-
-    // 真实解析时抽关键帧（每个镜头 1 帧，上限 8），供 UI 与后续 VLM 使用
-    let thumbs = 0;
-    if (filePath && parserName === 'ffmpeg-shotcut') {
-      const media = await import('@vbid/media-probe');
-      const outDir = join(DERIVED_ROOT, asset.id as string);
-      mkdirSync(outDir, { recursive: true });
-      const shots = parsed.shots.slice(0, 8);
-      for (let i = 0; i < shots.length; i++) {
-        const midMs = Math.round((shots[i].startMs + shots[i].endMs) / 2);
-        const name = `shot-${shots[i].index}.jpg`;
-        try {
-          await media.extractKeyframe(filePath, midMs, join(outDir, name));
-          shots[i].description += ` [thumb=/derived/${asset.id}/${name}]`;
-          thumbs++;
-        } catch { /* 单帧失败不阻断解析 */ }
-      }
-    }
-
-    db.prepare(`UPDATE assets SET status = 'parsed', meta_json = ? WHERE id = ?`).run(
-      JSON.stringify({ ...(JSON.parse(asset.meta_json as string) as object), parse: parsed }),
-      asset.id as string,
-    );
     return { parsed, thumbs };
   });
 
@@ -244,51 +218,62 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
     const task = getTask(ctx.params.id);
     if (!task) return { __status: 404, error: 'task not found' };
     if (task.status === 'done') return { __status: 409, error: 'task already run' };
-    const master = getAsset(task.master_asset_id as string);
-    if (!master) return { __status: 404, error: 'master asset missing' };
-    const matrix = createMatrix(JSON.parse(task.matrix_json as string).dimensions);
     const b = ctx.body as Record<string, unknown>;
     const seed = Number.isFinite(Number(b.seed)) ? Number(b.seed) : 42;
+    const { summary, task: doneTask } = await executeTask(task.id as string, seed);
+    return { summary, task: doneTask };
+  });
 
-    db.prepare(`UPDATE tasks SET status = 'generating' WHERE id = ?`).run(task.id as string);
-    const result = await runWorkflowA({
-      masterAssetId: master.id as string,
-      masterFilename: master.filename as string,
-      durationMs: Number(master.duration_ms ?? 11000),
-      variantCount: Number(task.variant_count),
-      seed,
-      dimensions: matrix.dimensions,
-    }, {
-      onVariant: (v) => {
-        const vid = newId('var');
-        db.prepare(
-          `INSERT INTO assets (id, kind, filename, parent_id, task_id, status, meta_json, review)
-           VALUES (?, 'variant', ?, ?, ?, ?, ?, NULL)`,
-        ).run(
-          vid, `${v.spec.id}.mp4`, master.id as string, task.id as string,
-          v.accepted ? 'accepted' : 'rejected',
-          JSON.stringify({
-            spec: v.spec,
-            fileRef: v.generated.fileRef,
-            descriptor: v.generated.descriptor,
-            fingerprint: v.generated.fingerprint,
-            guards: { fidelity: v.fidelity, dedup: v.dedup },
-          }),
-        );
-      },
-    });
-    db.prepare(`UPDATE tasks SET status = 'done' WHERE id = ?`).run(task.id as string);
+  // ---- Tunnel 演示入口：一键跑通端到端（①②③⑤→谱系，演示/试用场景）----
+  route('POST', '/api/demo/run', async (ctx) => {
+    const b = ctx.body as Record<string, unknown>;
+    // 1) 选演示 Master：可指定；缺省选「有真实文件、尚无已完成任务」的第一条，保证每次演示都有新鲜谱系
+    let master: Record<string, unknown> | null = null;
+    if (typeof b.master_id === 'string') {
+      master = getAsset(b.master_id);
+      if (!master || master.kind !== 'master') return { __status: 404, error: 'master not found' };
+    } else {
+      const candidates = db.prepare(
+        `SELECT * FROM assets WHERE kind = 'master' AND file_path IS NOT NULL ORDER BY created_at`,
+      ).all() as Array<Record<string, unknown>>;
+      master = candidates.find((m) => !db.prepare(
+        `SELECT id FROM tasks WHERE master_asset_id = ? AND status = 'done'`,
+      ).get(m.id as string)) ?? candidates[0] ?? null;
+    }
+    if (!master) {
+      return { __status: 400, error: 'no master asset with real file; 请先到 ① 上传解析 扫描素材目录' };
+    }
+
+    // 2) 确保已解析（真实文件 → ffmpeg-shotcut + 关键帧；无文件 → mock）
+    let freshlyParsed = false;
+    if (master.status !== 'parsed') {
+      await parseMaster(master, {
+        parser: master.file_path ? 'ffmpeg-shotcut' : 'mock',
+        durationMs: Number(master.duration_ms ?? 0),
+      });
+      freshlyParsed = true;
+      master = getAsset(master.id as string);
+    }
+
+    // 3) 建任务：默认矩阵 · 16 条（演示节奏，mock 链路秒级完成）
+    const variantCount = Number.isInteger(Number(b.variant_count)) ? Number(b.variant_count) : 16;
+    const matrix = createMatrix();
+    const cost = estimateCost(variantCount, 0.15);
+    const taskId = newId('tsk');
+    db.prepare(
+      `INSERT INTO tasks (id, master_asset_id, matrix_json, variant_count, rate_per_variant_usd, estimated_cost_usd)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(taskId, master.id as string, JSON.stringify(matrix), variantCount, cost.ratePerVariantUsd, cost.estimatedCostUsd);
+
+    // 4) 执行并汇总
+    const { summary } = await executeTask(taskId, 42);
     return {
-      summary: {
-        requestedCount: Number(task.variant_count),
-        variantCount: result.variants.length,
-        // 组合空间耗尽时按空间上限产出（README 语义：变体数 ≤ 组合空间）
-        spaceCapped: result.variants.length < Number(task.variant_count),
-        acceptedCount: result.acceptedCount,
-        rejectedCount: result.rejectedCount,
-        estimatedCostUsd: result.cost.estimatedCostUsd,
-      },
-      task: getTask(task.id as string),
+      __status: 201,
+      demo: true,
+      freshlyParsed,
+      master: { id: master.id, filename: master.filename },
+      task: getTask(taskId),
+      summary,
     };
   });
 
@@ -375,6 +360,98 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
   function getTask(id: string): Record<string, unknown> | null {
     const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Record<string, unknown> | undefined;
     return row ?? null;
+  }
+
+  /** 解析 Master：真实文件走 ffmpeg-shotcut 并抽关键帧（每镜头 1 帧，上限 8）；否则按指定/mock provider */
+  async function parseMaster(
+    asset: Record<string, unknown>,
+    opts: { parser?: string; filePath?: string; durationMs: number },
+  ): Promise<{ parsed: Awaited<ReturnType<ReturnType<typeof getParser>['parse']>>; thumbs: number }> {
+    const filePath = opts.filePath ?? (asset.file_path as string | null) ?? undefined;
+    const parserName = opts.parser ?? (filePath ? 'ffmpeg-shotcut' : 'mock');
+    const parser = getParser(parserName);
+    const parsed = await parser.parse({
+      assetId: asset.id as string,
+      filename: asset.filename as string,
+      durationMs: opts.durationMs,
+      filePath,
+    });
+
+    let thumbs = 0;
+    if (filePath && parserName === 'ffmpeg-shotcut') {
+      const media = await import('@vbid/media-probe');
+      const outDir = join(DERIVED_ROOT, asset.id as string);
+      mkdirSync(outDir, { recursive: true });
+      const shots = parsed.shots.slice(0, 8);
+      for (let i = 0; i < shots.length; i++) {
+        const midMs = Math.round((shots[i].startMs + shots[i].endMs) / 2);
+        const name = `shot-${shots[i].index}.jpg`;
+        try {
+          await media.extractKeyframe(filePath, midMs, join(outDir, name));
+          shots[i].description += ` [thumb=/derived/${asset.id}/${name}]`;
+          thumbs++;
+        } catch { /* 单帧失败不阻断解析 */ }
+      }
+    }
+
+    db.prepare(`UPDATE assets SET status = 'parsed', meta_json = ? WHERE id = ?`).run(
+      JSON.stringify({ ...(JSON.parse(asset.meta_json as string) as object), parse: parsed }),
+      asset.id as string,
+    );
+    return { parsed, thumbs };
+  }
+
+  /** 执行任务（工作流 A 第⑤–⑦步）：状态推进 generating→done，逐变体入库（含守卫结果） */
+  async function executeTask(
+    taskId: string,
+    seed: number,
+  ): Promise<{ summary: Record<string, unknown>; task: Record<string, unknown> }> {
+    const task = getTask(taskId);
+    if (!task) throw new Error('task not found');
+    const master = getAsset(task.master_asset_id as string);
+    if (!master) throw new Error('master asset missing');
+    const matrix = createMatrix(JSON.parse(task.matrix_json as string).dimensions);
+
+    db.prepare(`UPDATE tasks SET status = 'generating' WHERE id = ?`).run(taskId);
+    const result = await runWorkflowA({
+      masterAssetId: master.id as string,
+      masterFilename: master.filename as string,
+      durationMs: Number(master.duration_ms ?? 11000),
+      variantCount: Number(task.variant_count),
+      seed,
+      dimensions: matrix.dimensions,
+    }, {
+      onVariant: (v) => {
+        const vid = newId('var');
+        db.prepare(
+          `INSERT INTO assets (id, kind, filename, parent_id, task_id, status, meta_json, review)
+           VALUES (?, 'variant', ?, ?, ?, ?, ?, NULL)`,
+        ).run(
+          vid, `${v.spec.id}.mp4`, master.id as string, task.id as string,
+          v.accepted ? 'accepted' : 'rejected',
+          JSON.stringify({
+            spec: v.spec,
+            fileRef: v.generated.fileRef,
+            descriptor: v.generated.descriptor,
+            fingerprint: v.generated.fingerprint,
+            guards: { fidelity: v.fidelity, dedup: v.dedup },
+          }),
+        );
+      },
+    });
+    db.prepare(`UPDATE tasks SET status = 'done' WHERE id = ?`).run(taskId);
+    return {
+      summary: {
+        requestedCount: Number(task.variant_count),
+        variantCount: result.variants.length,
+        // 组合空间耗尽时按空间上限产出（README 语义：变体数 ≤ 组合空间）
+        spaceCapped: result.variants.length < Number(task.variant_count),
+        acceptedCount: result.acceptedCount,
+        rejectedCount: result.rejectedCount,
+        estimatedCostUsd: result.cost.estimatedCostUsd,
+      },
+      task: getTask(taskId)!,
+    };
   }
 
   const server = createServer(async (req, res) => {
