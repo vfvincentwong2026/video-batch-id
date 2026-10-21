@@ -1,0 +1,17 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .: {}
+
+  apps/api:
+    dependencies:
+      '@vbid/variable-matrix':
+        specifier: workspace:*
+        version: link:../../packages/variable-matrix
+
+  packages/variable-matrix: {}
