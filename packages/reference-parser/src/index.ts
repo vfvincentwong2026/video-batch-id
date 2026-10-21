@@ -34,12 +34,14 @@ export interface ParsedReference {
   durationMs: number;
   shots: Shot[];
   hooks: Hook[];
-  /** 口播/字幕文案 */
+  /** 口播/字幕文案（未转录时为空串） */
   transcript: string;
   bgm: { style: string; bpm: number | null };
   rhythm: { shotCount: number; avgShotSec: number };
   /** 解析器署名，便于审计与 A/B 对比 */
   parser: string;
+  /** 诚实清单：哪些维度是真实解析、哪些仍待增强（VLM/Whisper 接入后逐项移除） */
+  enrichment: { real: string[]; pending: string[] };
 }
 
 export interface ParseInput {
@@ -101,6 +103,53 @@ export class MockParserProvider implements ParserProvider {
         avgShotSec: Number((durationMs / 1000 / shots.length).toFixed(1)),
       },
       parser: this.name,
+      enrichment: { real: [], pending: ['shotcut', 'vlm-copy', 'bgm', 'transcript'] },
+    };
+  }
+}
+
+// ---------- Shotcut 实现（v0.2：真实镜头边界） ----------
+
+/**
+ * 基于 ffmpeg 场景切换检测的真实结构解析。
+ * 真实：镜头边界、节奏统计、分辨率/音轨探测。
+ * 待增强（诚实占位）：文案转录（Whisper）、BGM 分析、VLM 画面语义 —— 接入后逐维点亮。
+ */
+export class ShotcutParserProvider implements ParserProvider {
+  name = 'ffmpeg-shotcut';
+
+  async parse(input: ParseInput): Promise<ParsedReference> {
+    if (!input.filePath) throw new Error('ffmpeg-shotcut requires filePath');
+    const media = await import('@vbid/media-probe');
+    const probe = await media.probe(input.filePath);
+    const spans = await media.detectShots(input.filePath);
+    const durationMs = probe.durationMs || input.durationMs;
+
+    const shots: Shot[] = spans.map((s, i) => ({
+      index: i + 1,
+      startMs: s.startMs,
+      endMs: s.endMs,
+      // 结构推断：首镜头=Hook 位，末镜头=CTA 位，中间=action
+      type: (i === 0 ? 'hook' : i === spans.length - 1 && spans.length > 1 ? 'cta' : 'action') as ShotType,
+      description: `镜头 ${i + 1}（${(s.startMs / 1000).toFixed(1)}s–${(s.endMs / 1000).toFixed(1)}s，场景切换切出）`,
+    }));
+
+    return {
+      assetId: input.assetId,
+      durationMs,
+      shots,
+      hooks: [{ phrase: `首帧开屏（镜头1 · ${(shots[0]?.endMs ?? 0) / 1000 | 0}s）`, kind: 'visual' }],
+      transcript: '',
+      bgm: { style: probe.hasAudio ? '有音轨（BPM 分析待接入）' : '无声', bpm: null },
+      rhythm: {
+        shotCount: shots.length,
+        avgShotSec: Number((durationMs / 1000 / Math.max(1, shots.length)).toFixed(1)),
+      },
+      parser: this.name,
+      enrichment: {
+        real: ['shotcut', 'rhythm', 'probe'],
+        pending: probe.hasAudio ? ['vlm-copy', 'bgm', 'transcript'] : ['vlm-copy', 'bgm'],
+      },
     };
   }
 }
@@ -114,6 +163,7 @@ export function registerParser(p: ParserProvider): void {
 }
 
 registerParser(new MockParserProvider());
+registerParser(new ShotcutParserProvider());
 
 export function getParser(name = 'mock'): ParserProvider {
   const p = registry.get(name);

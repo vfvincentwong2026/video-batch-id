@@ -8,7 +8,8 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@vbid/variable-matrix": "workspace:*"
+    "@vbid/variable-matrix": "workspace:*",
+    "@vbid/media-probe": "workspace:*"
   },
   "scripts": {
     "test": "node --test"

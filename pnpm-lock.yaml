@@ -20,6 +20,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/variable-matrix
 
+  packages/media-probe: {}
+
   packages/pipeline:
     dependencies:
       '@vbid/reference-parser':
@@ -31,6 +33,9 @@ importers:
 
   packages/reference-parser:
     dependencies:
+      '@vbid/media-probe':
+        specifier: workspace:*
+        version: link:../media-probe
       '@vbid/variable-matrix':
         specifier: workspace:*
         version: link:../variable-matrix
