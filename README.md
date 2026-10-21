@@ -2,9 +2,9 @@
 
 # Video Batch ID
 
-**Industrial-grade batch video generation workstation.**
+**Batch video asset workstation for e-commerce and MCN teams.**
 
-<sub>批量短视频素材生成工作站 · 可复现的批量化视频生产管线</sub>
+<sub>面向电商与 MCN 的批量短视频素材工作站 · 生成 · 入库 · 复用 · 越用越准</sub>
 
 [![CI](https://github.com/your-org/video-batch-id/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/video-batch-id/actions)
 [![Docker](https://img.shields.io/badge/docker-compose-2496ED?logo=docker&logoColor=white)](#quick-start)
@@ -13,41 +13,77 @@
 [![Cloudflare](https://img.shields.io/badge/cloudflare-tunnel%20%2B%20d1-F38020?logo=cloudflare&logoColor=white)](#deployment-modes)
 [![License: Private](https://img.shields.io/badge/license-Private-lightgrey)](#license)
 
-[Overview](#overview) · [Features](#features) · [Architecture](#architecture) · [Deployment Modes](#deployment-modes) · [Quick Start](#quick-start) · [Roadmap](#roadmap) · [简体中文](#简体中文)
+[Why](#why) · [Who it's for](#who-its-for) · [Core Workflow](#core-workflow) · [Features](#features) · [Architecture](#architecture) · [Quick Start](#quick-start) · [Roadmap](#roadmap) · [简体中文](#简体中文)
 
 </div>
 
 ---
 
-## Overview
+## Why
 
-Video Batch ID is an **orchestration layer for batch short-form video generation**. It composes proven open-source components into a single reproducible pipeline, exposing an OpenAI-compatible API for programmatic access and a minimal operator workspace for web use.
+Generating one good video is a creative problem. Generating **a hundred usable assets per week** is a workflow problem.
 
-Submit a batch, receive assets. No per-clip babysitting.
+Video Batch ID is built for the second one. Upload a batch of products or scripts, pick a validated template, get a hundred variants, mark the good ones, and let the library compound. Every asset that gets reused makes the next batch smarter.
 
 **Design principles**
 
+- **Asset-first, not job-first** — every clip enters a searchable library with structured metadata. Jobs are transient; assets compound.
+- **Template over prompt** — operators pick from validated recipes, not blank text boxes.
+- **Batch is the default** — one upload, many outputs. No per-clip babysitting.
+- **Observable cost** — every job shows its price before you commit and its real cost after it runs.
 - **Assemble, don't rebuild** — routing, generation, composition, and speech are handled by battle-tested OSS.
-- **Provider-agnostic** — swap generation backends without touching the API contract.
-- **Observable by default** — every job emits cost, latency, and provenance metadata.
-- **Reproducible** — `docker compose up` yields a working workstation.
-- **Edge-reachable, locally-executed** — public access via Cloudflare Tunnel; inference stays on GPU hardware you control.
+
+---
+
+## Who it's for
+
+| User | Pain today | What they get |
+|---|---|---|
+| **E-commerce seller / UMKM** | Product photos exist, but video production is slow and expensive | Upload SKU sheet → batch product showcase videos, virtual try-on, multi-angle variants |
+| **MCN / agency operator** | Needs volume, style consistency, and per-clip control | Multi-account batch generation, per-clip re-render, character/style consistency |
+| **Content operator** | Spends hours per clip, can't track what works | One dashboard: generate, review, rate, reuse. Cost visible at every step. |
+
+---
+
+## Core Workflow
+
+### E-commerce: product-to-video batch
+① Upload products → ② Pick template → ③ Set batch params → ④ Generate
+↓
+⑦ Reuse / re-generate ← ⑥ Auto-index to library ← ⑤ Review & rate
+
+text
+
+| Step | You see | You do | System does |
+|---|---|---|---|
+| ① Upload | Drag zone + CSV template | Drop product images, upload SKU sheet | Parses SKUs, extracts selling points, detects category |
+| ② Template | Card gallery with 3-second previews | Pick "Beauty · Problem-Solution · TikTok" | Loads Skill recipe + provider preferences |
+| ③ Params | Sliders: variants per SKU, cost tier, duration | Drag slider, see live cost estimate | Computes estimated cost, locks budget ceiling |
+| ④ Generate | Live queue with per-task progress | Wait or walk away | Routes to GPU, async generation, auto-fallback on failure |
+| ⑤ Review | Grid view, playable, rate 👍/👎 | Quick-scan, rate, add notes | Records outcome, writes back to knowledge layer |
+| ⑥ Index | "87 assets indexed" toast | One-click index | Argus-style visual metadata + tags + embeddings |
+| ⑦ Reuse | Library search bar | Search "beauty + oily + last week" | Full-text + semantic retrieval |
+
+### MCN: matrix batch
+
+Same flow, with two differences: step ② adds **character/style consistency** options, and step ⑤ adds **per-clip re-render** so a single bad shot doesn't require regenerating the whole batch.
 
 ---
 
 ## Features
 
-| Capability | Detail |
+| Capability | What it means for you |
 |---|---|
-| **Batch-first API** | Submit *N* prompts, receive *N* assets. Async job lifecycle with SSE / webhook callbacks. |
-| **OpenAI-compatible** | `POST /v1/videos/generations` — drop-in with existing SDKs. |
-| **Multi-provider routing** | Declarative fallback chains across ComfyUI, external APIs, and local backends. |
-| **Cost-aware scheduling** | Tier-based routing (`standard` / `fast` / `economy`) with per-job cost attribution. |
-| **Composable output** | Video fragments + TTS + captions assembled via templated HTML → MP4. |
-| **Multi-language TTS** | Edge-TTS and beyond — Indonesian (`id-ID-ArdiNeural`, `id-ID-GadisNeural`) supported out of the box. |
-| **Durable job state** | Cloudflare D1 for cross-instance state; local SQLite fallback for air-gapped runs. |
-| **Public trial access** | Cloudflare Tunnel + Access — shareable domain, SSO/OTP gated, no public IP required. |
-| **Pluggable templates** | Versioned template registry; no hardcoded workflows. |
+| **Batch upload & SKU parsing** | Drop a CSV, get a queue. No per-item setup. |
+| **Template gallery with preview** | See 3-second previews before you commit. No prompt writing. |
+| **Live cost estimate** | Know the price before you click generate. See real spend in the queue. |
+| **Review & rate** | 👍/👎 every clip. Good ones auto-index; bad ones feed back into routing. |
+| **Searchable asset library** | Every output indexed with visual metadata, tags, and embeddings. Find "that beauty clip from last week" in seconds. |
+| **Reuse & re-generate** | Pull a past asset back into a new batch, or re-render one variant without touching the rest. |
+| **Skill-based routing memory** | Validated recipes + historical outcomes → cost/quality-aware provider selection. |
+| **OpenAI-compatible API** | `POST /v1/videos/generations` — programmatic access for automation. |
+| **Multi-language TTS** | Indonesian (`id-ID-ArdiNeural`, `id-ID-GadisNeural`) out of the box. |
+| **Public trial access** | Cloudflare Tunnel + Access — shareable domain, SSO/OTP gated. |
 
 ---
 
@@ -55,45 +91,50 @@ Submit a batch, receive assets. No per-clip babysitting.
 
 ```mermaid
 flowchart LR
-    A[Client / OpenAI SDK] --> B[Cloudflare Tunnel<br/>+ Access]
-    B --> C[Edge Gateway<br/>apps/web · apps/api]
+    A[Client / Operator UI] --> B[Cloudflare Tunnel<br/>+ Access]
+    B --> C[Gateway<br/>apps/web · apps/api]
     C --> D[Cloudflare D1<br/>job state · cost]
     C --> E[Local Queue<br/>SQLite / Redis]
     E --> F[GPU Worker<br/>pixhub + ComfyUI]
     F --> G[Compositor<br/>reel-kit]
     G --> H[TTS + Captions<br/>voice-compute]
-    H --> I[Local Output Store<br/>outputs/*.mp4]
-    I --> B
+    H --> I[Asset Library<br/>Argus-style index<br/>+ SQLite FTS5]
+    I --> C
+    I --> J[Knowledge Store<br/>skill outcomes · reuse signals]
+    J --> C
 Key decisions
 
-No object storage in MVP. Generated assets land on local disk (outputs/) and are served back through the same Tunnel. Zero egress cost, zero extra accounts.
+Asset library is a first-class layer, not a folder. Every output is indexed, tagged, and searchable.
 
-D1 is the source of truth for job state. The local API writes to D1 via the Cloudflare REST API — no Workers required.
+Knowledge is a sidecar, not a blocker. If the knowledge store fails, generation still routes with default policy.
 
-Queues are local for now. The GPU consumer runs on the same host as the queue, so a Cloudflare Queue would add latency without benefit. Cloudflare Queues will be introduced when compute moves to cloud (see Roadmap).
+No object storage in MVP. Assets live on local disk, served through the same Tunnel. Zero egress cost.
 
-Every stage is a replaceable service. The router decides where; the pipeline decides how; the gateway guarantees a stable contract.
+D1 is the source of truth for job state. Local API writes to D1 via REST — no Workers required.
 
-Deployment Modes
-The workstation ships with three deployment profiles. Pick one via docker compose --profile <name>.
+Queues are local for now. GPU consumer runs on the same host. Cloudflare Queues arrive when compute moves to cloud.
 
-Mode	Use case	Stack	Public?
-local	Development, testing	Local services only	❌
-tunnel	MVP demos, seed-user trials	Local services + Cloudflare Tunnel + Access + D1	✅
-cloud	L2 platformization (future)	Cloud VM + Cloudflare Queues + R2	✅
-tunnel mode is the current target. It gives you a shareable HTTPS domain, identity-gated access, and durable job state — without a public IP, without object storage, and without GPU infrastructure exposed to the internet.
-
+UI Overview
+Screen	Purpose
+Dashboard	Today's output, success rate, spend, running jobs, recently-rated assets
+Batch Generate	4-step wizard: upload → template → params → submit. Live cost estimate.
+Template Gallery	Card grid with 3-second previews, ratings, reuse counts
+Task Queue	Per-task progress, real-time spend, auto-retry indicator
+Review	Grid view, play, rate, batch-download, per-clip re-render
+Asset Library	Search bar + filters (category, platform, tag, date), reuse button
+Knowledge (internal)	Skill success rates, cost per outcome, reuse analytics
 Tech Stack
 Layer	Component	Role
 Ingress	Cloudflare Tunnel	Public HTTPS endpoint, no open ports
-Access control	Cloudflare Access	SSO / OTP gate for trial users
-State	Cloudflare D1	Job state, cost records, template metadata
+Access	Cloudflare Access	SSO / OTP gate for trial users
+State	Cloudflare D1	Job state, cost records
+Asset Index	Argus-style scanner + SQLite FTS5	Visual metadata, tags, full-text search
 Gateway	free-multimodal-proxy / ComfyUI-OpenAI-API-Refactored	OpenAI-compatible ingress, async lifecycle
 Router	pixhub	Provider adapters, fallback chains, tier routing
 Generation	ComfyUI + kt-ai-Studio	Workflow execution, batch queue
 Composition	reel-kit	HTML template → MP4 assembly
 Speech	voice-compute	Edge-TTS, Whisper captions
-Glue (in-repo)	apps/api, packages/template-engine, packages/cost-tracker	Batch input, template mapping, cost telemetry
+Glue (in-repo)	apps/api, apps/web, packages/template-engine, packages/cost-tracker, packages/asset-index	Batch ingest, UI, template mapping, cost telemetry, asset indexing
 Quick Start
 Requirements — Docker 24+, Docker Compose v2, NVIDIA driver + Container Toolkit (GPU mode). Cloudflare account (tunnel mode).
 
@@ -111,47 +152,50 @@ Health check	http://localhost:8000/healthz
 Tunnel mode (trial / demo)
 Create a tunnel in Cloudflare Zero Trust → Networks → Tunnels.
 
-Copy the tunnel token into .env as CLOUDFLARE_TUNNEL_TOKEN.
+Copy the token into .env as CLOUDFLARE_TUNNEL_TOKEN.
 
-Create a D1 database and set CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_D1_DATABASE_ID, CLOUDFLARE_API_TOKEN.
+Create a D1 database, set CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_D1_DATABASE_ID, CLOUDFLARE_API_TOKEN.
 
-Apply the schema: make d1-migrate.
+Apply schema: make d1-migrate.
 
-Start the stack:
+Start:
 
 bash
 docker compose --profile tunnel --profile gpu up -d
-Your workspace is now reachable at https://vbid.your-domain.com, gated by Cloudflare Access.
+Workspace reachable at https://vbid.your-domain.com, gated by Cloudflare Access.
 
-First GPU start downloads model weights. Reserve ≥ 30 GB disk and allow several minutes.
+First GPU start downloads model weights. Reserve ≥ 30 GB disk.
 
-Smoke test
+First-run walkthrough
 
-bash
-curl -X POST https://vbid.your-domain.com/v1/videos/generations \
-  -H "Content-Type: application/json" \
-  -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" \
-  -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" \
-  -d '{
-    "model": "vbid-standard",
-    "prompt": "Product close-up, rotating, soft studio light",
-    "duration": 5,
-    "resolution": "480p"
-  }'
+Open the dashboard → click Upload products
+
+Drop product images or upload a CSV → confirm parsed SKUs
+
+Pick a template from the gallery → preview plays inline
+
+Set variants per SKU (default: 5) and cost tier (default: standard)
+
+Review estimated cost → click Generate
+
+Watch the queue → when done, open Review
+
+Rate 👍/👎 → click Index to library
+
+Open Asset Library → search or reuse
+
 Configuration
-Configuration is environment-driven. Copy .env.example and adjust.
-
 Variable	Description	Default
-VBID_PROFILE	Active profile (local / tunnel / cloud)	local
+VBID_PROFILE	local / tunnel / cloud	local
 VBID_GATEWAY_PORT	API gateway port	8000
 VBID_WEB_PORT	Web workspace port	3000
 VBID_STATE_BACKEND	d1 or sqlite	d1 in tunnel mode
-VBID_DB_URL	Local SQLite URL (fallback)	sqlite:///data/vbid.db
+VBID_ASSET_DIR	Asset storage directory	./assets
+VBID_INDEX_BACKEND	sqlite-fts / pgvector	sqlite-fts
 CLOUDFLARE_ACCOUNT_ID	Cloudflare account	—
 CLOUDFLARE_D1_DATABASE_ID	D1 database ID	—
 CLOUDFLARE_API_TOKEN	API token with D1 read/write	—
 CLOUDFLARE_TUNNEL_TOKEN	Tunnel token	—
-VBID_OUTPUT_DIR	Local asset directory	./outputs
 VBID_ROUTER_CONFIG	Routing policy YAML	config/routes.yaml
 See docs/configuration.md for the full reference.
 
@@ -160,129 +204,45 @@ text
 video-batch-id/
 ├── apps/
 │   ├── api/                 # Gateway glue: batch ingest, dispatch, D1 state
-│   └── web/                 # Operator workspace (batch UI)
+│   └── web/                 # Operator workspace (dashboard, wizard, review, library)
 ├── packages/
 │   ├── template-engine/     # (category, hook) → workflow params + HTML template
-│   └── cost-tracker/        # Per-job cost and latency telemetry
+│   ├── cost-tracker/        # Per-job cost and latency telemetry
+│   ├── asset-index/         # Argus-style visual metadata + FTS5 indexing
+│   └── knowledge-store/     # Skill outcomes, reuse signals, routing memory
+├── skills/                  # YAML skill recipes (versioned)
 ├── vendor/                  # Service configs, pinned image refs (no source)
 ├── config/
 │   └── routes.yaml          # Provider fallback + tier policy
 ├── migrations/
 │   └── d1/                  # D1 schema migrations
-├── outputs/                 # Generated assets (git-ignored)
+├── assets/                  # Generated assets (git-ignored)
 ├── docs/                    # PRD, architecture, configuration, licenses
 ├── docker-compose.yml
 └── .env.example
-No source is vendored. Services are pulled as pinned images or referenced via submodule. This keeps upstream upgrades clean and license boundaries explicit.
-
-Development
-bash
-# API
-cd apps/api && python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]" && pytest
-
-# Web
-cd apps/web && pnpm install && pnpm dev
-Conventions — Conventional Commits, ruff + mypy (Python), eslint + prettier (TS). CI runs on every PR.
-
 Roadmap
 Version	Milestone	Deployment
-v0.1.0	Minimal batch pipeline · OpenAI-compatible gateway · local SQLite state	local
-v0.2.0	Tunnel mode · D1 state · Access-gated trial	tunnel
-v0.3.0	Multi-provider routing · cost tracker · tier scheduling	tunnel
-v0.4.0	Template engine v1 · reel-kit integration · TTS pipeline	tunnel
-v0.5.0	Cloud VM deployment · Cloudflare Queues · R2 migration	cloud
-v0.6.0	Horizontal scaling · Prometheus / OpenTelemetry export	cloud
-Detailed scope in docs/ROADMAP.md.
+v0.1.0	Batch wizard · template gallery · live cost estimate · local SQLite state	local
+v0.2.0	Tunnel mode · D1 state · Access-gated trial · task queue UI	tunnel
+v0.3.0	Review & rate · Argus-style asset indexing · SQLite FTS5 search	tunnel
+v0.4.0	Product-to-video workflow · SKU batch input · virtual try-on	tunnel
+v0.5.0	Skill recipe engine · outcome writeback · cost/quality-aware routing	tunnel
+v0.6.0	MCN matrix mode · style consistency · per-clip re-render	tunnel
+v0.7.0	pgvector semantic search · reuse analytics · cloud VM deployment	cloud
+Model Licenses
+Commercial use requires per-model verification. Current anchors:
+
+Model	License	Commercial note
+Wan 2.2 (T2V-A14B / TI2V-5B)	Apache 2.0	No revenue cap, no region exclusion. Primary anchor.
+LTX-Video / LTX-2.3	LTX Open Weights	Free under $10M annual revenue; paid license above.
+HunyuanVideo	Tencent Community	Excludes EU/UK/South Korea; 100M MAU cap.
+CogVideoX-5b	CogVideoX Community	Free under 1M MAU.
+Full matrix in docs/licenses.md.
 
 Contributing
 See CONTRIBUTING.md. All contributors follow the Code of Conduct.
 
 License
-This project is private and not open-sourced. Third-party dependency licenses — including MIT, Apache-2.0, AGPL, and commercial-restricted components — are enumerated in docs/licenses.md. Review before distribution.
-
-Acknowledgments
-Built on the shoulders of ComfyUI, pixhub, free-multimodal-proxy, reel-kit, and voice-compute.
+This project is private and not open-sourced. Third-party dependency licenses are enumerated in docs/licenses.md. Review before distribution.
 
 <details> <summary><h3 id="简体中文">📖 简体中文</h3></summary>
-Video Batch ID
-工业级批量视频生成工作站。
-
-Video Batch ID 是一个批量短视频生成的编排层。它将经过验证的开源组件组合为一条可复现的管线，对外提供 OpenAI 兼容 API，对内提供最小化运营工作台。
-
-提交一批，回收一批。无需逐条照料。
-
-设计原则
-
-组装，而非重造 — 路由、生成、合成、语音均复用成熟开源项目。
-
-后端无关 — 更换生成后端不影响 API 契约。
-
-默认可观测 — 每个任务输出成本、延迟与溯源元数据。
-
-可复现 — docker compose up 即可得到完整工作站。
-
-边缘可达，本地执行 — 通过 Cloudflare Tunnel 暴露公网入口，推理留在可控的 GPU 硬件上。
-
-核心能力
-
-批量优先的 OpenAI 兼容 API（/v1/videos/generations），支持 SSE 与 webhook 回调
-
-多后端路由与降级链（ComfyUI / 外部 API / 本地模型）
-
-成本分层调度（standard / fast / economy），逐任务成本归因
-
-片段 + 印尼语 TTS + 字幕 → 竖版 MP4 的可组合产出
-
-Cloudflare D1 存储跨实例任务状态；本地 SQLite 作为离线降级
-
-Cloudflare Tunnel + Access 提供可分享域名与身份门禁，无需公网 IP
-
-版本化模板注册表，无硬编码工作流
-
-部署模式
-
-模式	用途	栈	公网
-local	开发、测试	仅本地服务	❌
-tunnel	MVP 演示、种子用户试用	本地服务 + Cloudflare Tunnel + Access + D1	✅
-cloud	L2 平台化（未来）	云服务器 + Cloudflare Queues + R2	✅
-当前目标为 tunnel 模式：无需公网 IP、无需对象存储、不暴露 GPU 基础设施，即可获得可分享的 HTTPS 域名、身份门禁与持久任务状态。
-
-架构：客户端 → Cloudflare Tunnel + Access → 边缘网关（apps/web · apps/api）→ D1（状态与成本）/ 本地队列 → GPU Worker（pixhub + ComfyUI）→ 合成（reel-kit）→ 语音（voice-compute）→ 本地 outputs/ 视频，经同一 Tunnel 回传下载。
-
-关键决策
-
-MVP 不引入对象存储。 生成资产落在本地磁盘 outputs/，通过同一 Tunnel 回传。零 Egress 成本、零额外账户。
-
-D1 是任务状态的唯一真相源。 本地 API 通过 Cloudflare REST API 直写 D1，无需 Workers。
-
-队列暂时本地化。 GPU 消费端与队列同机，引入 Cloudflare Queue 只会增加延迟；待算力上云后再迁移（见路线图）。
-
-每一层都是可替换服务。 路由决定“去哪”，管线决定“怎么做”，网关保证稳定契约。
-
-技术栈：见上方表格。自研范围仅 apps/api、packages/template-engine、packages/cost-tracker 三块胶水。
-
-快速开始
-
-bash
-git clone git@github.com:your-org/video-batch-id.git
-cd video-batch-id
-cp .env.example .env
-
-# 本地开发
-docker compose --profile local up -d
-
-# Tunnel 试用模式（需配置 Tunnel token 与 D1 凭证）
-docker compose --profile tunnel --profile gpu up -d
-本地：Web http://localhost:3000 · API http://localhost:8000
-Tunnel：https://vbid.your-domain.com（由 Cloudflare Access 门禁）
-
-目录结构：apps/（网关胶水与 Web 工作台）、packages/（模板引擎与成本追踪）、vendor/（服务配置与镜像锁定，不存源码）、config/（路由策略）、migrations/d1/（D1 schema）、outputs/（生成资产，git 忽略）、docs/（PRD、架构、配置、许可证）。
-
-开发约定：Conventional Commits；Python 用 ruff + mypy，TS 用 eslint + prettier；CI 覆盖所有 PR。
-
-路线图：v0.1 最小批量管线 → v0.2 Tunnel 模式 + D1 → v0.3 多后端路由 + 成本追踪 → v0.4 模板引擎 + 合成 + TTS → v0.5 云服务器部署 + Queues + R2 → v0.6 水平扩展与可观测性导出。
-
-许可证：本项目为私有项目。第三方依赖许可证（MIT / Apache-2.0 / AGPL / 商用受限）详见 docs/licenses.md，分发前必须核对。
-
-</details> ```
