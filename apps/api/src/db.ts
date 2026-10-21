@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS assets (
   task_id TEXT REFERENCES tasks(id),
   status TEXT NOT NULL DEFAULT 'uploaded',
   meta_json TEXT NOT NULL DEFAULT '{}',
+  file_path TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   review INTEGER
 );
@@ -61,9 +62,18 @@ CREATE INDEX IF NOT EXISTS idx_assets_kind ON assets(kind);
 CREATE INDEX IF NOT EXISTS idx_tasks_master ON tasks(master_asset_id);
 `;
 
+/** 轻量迁移：为已存在的库补列（幂等） */
+export function migrate(db: DatabaseSync): void {
+  const cols = db.prepare(`PRAGMA table_info(assets)`).all() as Array<{ name: string }>;
+  if (!cols.some((c) => c.name === 'file_path')) {
+    db.exec(`ALTER TABLE assets ADD COLUMN file_path TEXT`);
+  }
+}
+
 export function openDb(path = ':memory:'): DatabaseSync {
   const db = new DatabaseSync(path);
   db.exec(SCHEMA);
+  migrate(db);
   return db;
 }
 

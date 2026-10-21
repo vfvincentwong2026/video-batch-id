@@ -10,6 +10,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@vbid/media-probe':
+        specifier: workspace:*
+        version: link:../../packages/media-probe
       '@vbid/pipeline':
         specifier: workspace:*
         version: link:../../packages/pipeline

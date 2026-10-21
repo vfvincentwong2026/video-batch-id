@@ -7,7 +7,8 @@
   "dependencies": {
     "@vbid/variable-matrix": "workspace:*",
     "@vbid/reference-parser": "workspace:*",
-    "@vbid/pipeline": "workspace:*"
+    "@vbid/pipeline": "workspace:*",
+    "@vbid/media-probe": "workspace:*"
   },
   "scripts": {
     "start": "node src/server.ts",

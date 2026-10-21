@@ -20,12 +20,17 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { readFile } from 'node:fs/promises';
+import { mkdirSync } from 'node:fs';
+import { readdir } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb, newId, type DatabaseSync } from './db.ts';
 import { createMatrix, estimateCost, enabledDimensions } from '@vbid/variable-matrix';
 import { getParser } from '@vbid/reference-parser';
 import { runWorkflowA } from '@vbid/pipeline';
+
+/** 派生资产（关键帧等）根目录：仓库 assets/derived（git 忽略） */
+const DERIVED_ROOT = fileURLToPath(new URL('../../../assets/derived/', import.meta.url));
 
 interface Ctx {
   db: DatabaseSync;
@@ -83,16 +88,50 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
     }
     const id = newId(kind === 'master' ? 'mas' : 'var');
     db.prepare(
-      `INSERT INTO assets (id, kind, filename, duration_ms, parent_id, task_id, status, meta_json)
-       VALUES (?, ?, ?, ?, ?, ?, 'uploaded', ?)`,
+      `INSERT INTO assets (id, kind, filename, duration_ms, parent_id, task_id, status, meta_json, file_path)
+       VALUES (?, ?, ?, ?, ?, ?, 'uploaded', ?, ?)`,
     ).run(
       id, kind, b.filename,
       typeof b.duration_ms === 'number' ? b.duration_ms : null,
       typeof b.parent_id === 'string' ? b.parent_id : null,
       typeof b.task_id === 'string' ? b.task_id : null,
       JSON.stringify(b.meta ?? {}),
+      typeof b.file_path === 'string' ? b.file_path : null,
     );
     return { __status: 201, asset: getAsset(id) };
+  });
+
+  // ---- 批量登记素材目录（v0.2：真实素材入库）----
+  route('POST', '/api/assets/scan-dir', async (ctx) => {
+    const b = ctx.body as Record<string, unknown>;
+    if (typeof b.dir !== 'string' || !b.dir) return { __status: 400, error: 'dir is required' };
+    const media = await import('@vbid/media-probe');
+    if (!media.hasFfmpegTools()) return { __status: 500, error: 'ffmpeg/ffprobe not found' };
+    let entries: string[];
+    try {
+      entries = (await readdir(b.dir)).filter((f) => /\.(mp4|mov|webm)$/i.test(f));
+    } catch {
+      return { __status: 400, error: `cannot read dir: ${b.dir}` };
+    }
+    const registered: unknown[] = [];
+    const skipped: string[] = [];
+    for (const filename of entries) {
+      const exists = db.prepare(`SELECT id FROM assets WHERE kind = 'master' AND filename = ?`).get(filename);
+      if (exists) { skipped.push(filename); continue; }
+      try {
+        const filePath = join(b.dir, filename);
+        const probe = await media.probe(filePath);
+        const id = newId('mas');
+        db.prepare(
+          `INSERT INTO assets (id, kind, filename, duration_ms, status, meta_json, file_path)
+           VALUES (?, 'master', ?, ?, 'registered', ?, ?)`,
+        ).run(id, filename, probe.durationMs, JSON.stringify({ probe }), filePath);
+        registered.push(getAsset(id));
+      } catch (e) {
+        skipped.push(`${filename} (${(e as Error).message})`);
+      }
+    }
+    return { __status: 201, registered, skipped, count: registered.length };
   });
 
   route('GET', '/api/assets', (ctx, req) => {
@@ -160,7 +199,10 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
     const asset = getAsset(ctx.params.id);
     if (!asset || asset.kind !== 'master') return { __status: 404, error: 'master asset not found' };
     const b = ctx.body as Record<string, unknown>;
-    const parser = getParser(typeof b.parser === 'string' ? b.parser : 'mock');
+    const filePath = (asset.file_path as string | null) ?? (typeof b.file_path === 'string' ? b.file_path : undefined);
+    // 有真实文件 → 默认 shotcut 真实解析；否则 mock
+    const parserName = typeof b.parser === 'string' ? b.parser : filePath ? 'ffmpeg-shotcut' : 'mock';
+    const parser = getParser(parserName);
     const durationMs = Number(asset.duration_ms ?? b.duration_ms ?? 0);
     if (!Number.isFinite(durationMs) || durationMs <= 0) {
       return { __status: 400, error: 'asset has no duration_ms; pass it in body' };
@@ -169,12 +211,32 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
       assetId: asset.id as string,
       filename: asset.filename as string,
       durationMs,
+      filePath,
     });
+
+    // 真实解析时抽关键帧（每个镜头 1 帧，上限 8），供 UI 与后续 VLM 使用
+    let thumbs = 0;
+    if (filePath && parserName === 'ffmpeg-shotcut') {
+      const media = await import('@vbid/media-probe');
+      const outDir = join(DERIVED_ROOT, asset.id as string);
+      mkdirSync(outDir, { recursive: true });
+      const shots = parsed.shots.slice(0, 8);
+      for (let i = 0; i < shots.length; i++) {
+        const midMs = Math.round((shots[i].startMs + shots[i].endMs) / 2);
+        const name = `shot-${shots[i].index}.jpg`;
+        try {
+          await media.extractKeyframe(filePath, midMs, join(outDir, name));
+          shots[i].description += ` [thumb=/derived/${asset.id}/${name}]`;
+          thumbs++;
+        } catch { /* 单帧失败不阻断解析 */ }
+      }
+    }
+
     db.prepare(`UPDATE assets SET status = 'parsed', meta_json = ? WHERE id = ?`).run(
       JSON.stringify({ ...(JSON.parse(asset.meta_json as string) as object), parse: parsed }),
       asset.id as string,
     );
-    return { parsed };
+    return { parsed, thumbs };
   });
 
   // ---- 任务执行（工作流 A 第⑤–⑦步，mock 链路同步执行）----
@@ -335,6 +397,20 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
       return;
     }
     // 静态工作台（apps/web）：非 /api、非 /healthz 的 GET 请求尝试按文件服务
+    if (method === 'GET' && pathname.startsWith('/derived/')) {
+      const rel = normalize(pathname.replace('/derived/', '')).replace(/^([/\\])+/, '');
+      const filePath = normalize(join(DERIVED_ROOT, rel));
+      if (!filePath.startsWith(normalize(DERIVED_ROOT))) { json(res, 403, { error: 'forbidden' }); return; }
+      try {
+        const content = await readFile(filePath);
+        res.writeHead(200, { 'content-type': 'image/jpeg' });
+        res.end(content);
+        return;
+      } catch {
+        json(res, 404, { error: 'not found' });
+        return;
+      }
+    }
     if (method === 'GET' && !pathname.startsWith('/api') && pathname !== '/healthz') {
       const webRoot = fileURLToPath(new URL('../../web/', import.meta.url));
       const rel = pathname === '/' ? 'index.html' : normalize(pathname).replace(/^([/\\])+/, '');
