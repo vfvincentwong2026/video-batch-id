@@ -4,12 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Video Batch ID · 运营工作台</title>
+<meta name="description" content="让一条好素材，安全地变成一百条好素材 —— 印尼短视频电商二创平台">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
+<a class="skip-link" href="#view">跳到主内容</a>
 <header class="topbar">
   <div class="brand">Video Batch ID <span class="tagline">让一条好素材，安全地变成一百条好素材</span></div>
-  <nav id="nav">
+  <nav id="nav" aria-label="主导航">
     <a href="#/dashboard" data-route="dashboard">工作台</a>
     <a href="#/upload" data-route="upload">① 上传解析</a>
     <a href="#/matrix" data-route="matrix">③ 变量矩阵</a>
@@ -19,8 +21,15 @@
     <a href="#/library" data-route="library">素材库 · 价值榜</a>
   </nav>
 </header>
-<main id="view"><p class="muted">加载中…</p></main>
-<footer class="footer">v0.1 骨架模式（mock 生成链路）· 生成层 provider 可替换：ComfyUI/Wan2.2 · 视频 API</footer>
+<main id="view" aria-live="polite">
+  <div class="stats" aria-hidden="true">
+    <div class="skeleton stat-card"></div><div class="skeleton stat-card"></div>
+    <div class="skeleton stat-card"></div><div class="skeleton stat-card"></div>
+    <div class="skeleton stat-card"></div>
+  </div>
+  <div class="skeleton row"></div><div class="skeleton row"></div><div class="skeleton row"></div>
+</main>
+<footer class="footer">v0.2 · 生成层 provider 可替换：ComfyUI/Wan2.2 · 视频 API ｜ 镜头解析：ffmpeg-shotcut 真实场景切分</footer>
 <script src="/app.js"></script>
 </body>
 </html>

@@ -24,6 +24,18 @@ function toast(msg, isErr = false) {
   setTimeout(() => el.remove(), 4000);
 }
 
+function skeleton(rows = 3) {
+  return `<div class="stats" aria-hidden="true">
+    <div class="skeleton stat-card"></div><div class="skeleton stat-card"></div>
+    <div class="skeleton stat-card"></div><div class="skeleton stat-card"></div>
+    <div class="skeleton stat-card"></div>
+  </div>` + Array.from({ length: rows }, () => '<div class="skeleton row"></div>').join('');
+}
+
+function emptyState(icon, text, actionHtml) {
+  return `<div class="empty"><div class="empty-icon" aria-hidden="true">${icon}</div><p>${text}</p>${actionHtml ?? ''}</div>`;
+}
+
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -62,7 +74,7 @@ async function renderDashboard() {
       <h2>最近任务</h2>
       ${tasks.tasks.length ? `<table><tr><th>任务</th><th>Master</th><th>变体数</th><th>预估成本</th><th>状态</th></tr>
         ${tasks.tasks.slice(0, 8).map((t) => `<tr><td>${esc(t.id)}</td><td>${esc(t.master_asset_id)}</td><td>${t.variant_count}</td><td>$${t.estimated_cost_usd}</td><td>${badge(t.status)}</td></tr>`).join('')}</table>`
-        : '<p class="muted">还没有任务，从 ① 上传素材开始。</p>'}
+        : emptyState('📋', '还没有任务', '<a class="btn-link" href="#/upload">① 上传素材开始 →</a>')}
     </div>`;
 }
 
@@ -72,7 +84,7 @@ async function renderUpload() {
       <h2>批量登记素材目录（v0.2 · 真实元数据入库）</h2>
       <p class="muted">扫描目录下全部 mp4/mov/webm：ffprobe 探测时长/分辨率/音轨并入库，重复文件自动跳过。</p>
       <div class="form-row" style="grid-template-columns: 3fr auto">
-        <div><label>素材目录</label><input id="scan-dir" value="D:\\桌面工作\\AI project\\Video Batch ID\\Master Asset"></div>
+        <div><label class="field">素材目录</label><input id="scan-dir" value="D:\\桌面工作\\AI project\\Video Batch ID\\Master Asset"></div>
         <button id="btn-scan">扫描入库 →</button>
       </div>
       <div id="scan-result" style="margin-top:12px"></div>
@@ -81,9 +93,9 @@ async function renderUpload() {
       <h2>① 上传参考视频（Master Asset）</h2>
       <p class="muted">v0.1 骨架模式登记元信息；文件本体存放接入后置。拖入一条已跑通的爆款。</p>
       <div class="form-row">
-        <div><label>文件名（如 sambal-matah-hit.mp4）</label><input id="f-name" placeholder="master.mp4"></div>
-        <div><label>时长（毫秒）</label><input id="f-dur" type="number" value="11000"></div>
-        <div><label>备注（可选）</label><input id="f-note" placeholder="播放 50万 · 带货 2000单"></div>
+        <div><label class="field">文件名（如 sambal-matah-hit.mp4）</label><input id="f-name" placeholder="master.mp4"></div>
+        <div><label class="field">时长（毫秒）</label><input id="f-dur" type="number" value="11000"></div>
+        <div><label class="field">备注（可选）</label><input id="f-note" placeholder="播放 50万 · 带货 2000单"></div>
         <button id="btn-upload">上传并解析 →</button>
       </div>
     </div>
@@ -150,17 +162,17 @@ async function renderMatrix() {
     <div class="panel">
       <h2>③ 变量矩阵：勾选「变什么、锁什么」</h2>
       <div class="form-row" style="grid-template-columns: 1fr 2fr;">
-        <div><label>Master 素材</label>
+        <div><label class="field">Master 素材</label>
           <select id="m-master">${masters.map((m) => `<option value="${m.id}" ${m.id === selected.id ? 'selected' : ''}>${esc(m.filename)}${m.duration_ms ? `（${Math.round(m.duration_ms / 1000)}s）` : ''}</option>`).join('')}</select>
         </div>
-        <div><label>解析摘要</label>
+        <div><label class="field">解析摘要</label>
           <p class="muted" style="margin:8px 0 0">${parsed ? `${parsed.shots.length} 镜头 · ${esc(parsed.bgm.style)}${parsed.bgm.bpm ? ` ${parsed.bgm.bpm} BPM` : ''} · Hook: ${parsed.hooks.map((h) => esc(h.phrase)).join(' / ')}` : '未解析，请到 ① 页先解析'}</p>
         </div>
       </div>
       <div id="dim-grid" class="dim-grid" style="margin-top:16px"></div>
       <div class="form-row" style="grid-template-columns: 1fr 2fr auto; margin-top:16px">
-        <div><label>变体数量</label><input id="m-count" type="number" value="30"></div>
-        <div><label>组合空间（启用维度选项数乘积）</label><div id="m-space" class="num" style="font-size:22px;font-weight:700"></div></div>
+        <div><label class="field">变体数量</label><input id="m-count" type="number" value="30"></div>
+        <div><label class="field">组合空间（启用维度选项数乘积）</label><div id="m-space" class="num" style="font-size:22px;font-weight:700"></div></div>
         <button id="m-create">创建生成任务 →</button>
       </div>
     </div>`;
@@ -259,7 +271,7 @@ async function renderReview() {
               <button class="small ghost" data-bad="${v.id}">👎</button>
             </div>
           </div>`;
-        }).join('')}</div>` : '<p class="muted">还没有变体，先到 <a href="#/queue">⑤ 任务队列</a> 跑一个任务。</p>'}
+        }).join('')}</div>` : emptyState('🎬', '还没有变体', '<a class="btn-link" href="#/queue">⑤ 任务队列跑一个任务 →</a>')}
     </div>`;
   document.querySelectorAll('[data-good],[data-bad]').forEach((btn) => {
     btn.onclick = async () => {
@@ -293,7 +305,7 @@ async function renderLineage() {
           ${esc(v.filename)} ${badge(v.status)}
           ${v.review === 1 ? '<span class="badge accepted">👍</span>' : v.review === 0 ? '<span class="badge rejected">👎</span>' : '<span class="badge pending">待审</span>'}
           <div class="muted" style="font-size:12px">${esc(v.meta?.descriptor || '')}</div>
-        </div>`).join('') || '<p class="muted">还没有变体</p>'}
+        </div>`).join('') || emptyState('🌱', '还没有变体，先运行生成任务')}
       </div>`);
   }
   view.innerHTML = `<div class="panel"><h2>⑧ 素材谱系（哪个 Master 最值钱，一图看清）</h2>${parts.join('')}</div>`;
@@ -313,14 +325,14 @@ async function renderLibrary() {
         <td>${m.acceptedCount}</td><td>${m.goodCount} / ${m.badCount}</td>
         <td>${m.passRate === null ? '—' : Math.round(m.passRate * 100) + '%'}</td>
         <td><strong>${m.valueScore}</strong></td>
-      </tr>`).join('')}</table>` : '<p class="muted">暂无 Master。</p>'}
+      </tr>`).join('')}</table>` : emptyState('🍬', '暂无 Master 素材')}
     </div>
     <div class="panel">
       <h2>素材库检索</h2>
       <div class="form-row" style="grid-template-columns: 2fr 1fr 1fr auto">
-        <div><label>关键词（文件名/描述/变量取值）</label><input id="lib-q" placeholder="如：餐厅、Hook=拉丝、V02"></div>
-        <div><label>类型</label><select id="lib-kind"><option value="">全部</option><option value="master">Master</option><option value="variant">变体</option></select></div>
-        <div><label>状态</label><select id="lib-status"><option value="">全部</option><option value="accepted">通过守卫</option><option value="rejected">被拦截</option><option value="parsed">已解析</option></select></div>
+        <div><label class="field">关键词（文件名/描述/变量取值）</label><input id="lib-q" placeholder="如：餐厅、Hook=拉丝、V02"></div>
+        <div><label class="field">类型</label><select id="lib-kind"><option value="">全部</option><option value="master">Master</option><option value="variant">变体</option></select></div>
+        <div><label class="field">状态</label><select id="lib-status"><option value="">全部</option><option value="accepted">通过守卫</option><option value="rejected">被拦截</option><option value="parsed">已解析</option></select></div>
         <button id="lib-search">搜索</button>
       </div>
       <div id="lib-result" style="margin-top:14px"></div>
@@ -363,7 +375,7 @@ async function route() {
   document.querySelectorAll('#nav a').forEach((a) => {
     a.classList.toggle('active', a.dataset.route === name);
   });
-  view.innerHTML = '<p class="muted">加载中…</p>';
+  view.innerHTML = skeleton();
   try {
     await fn();
   } catch (e) {
