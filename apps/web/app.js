@@ -69,6 +69,15 @@ async function renderDashboard() {
 async function renderUpload() {
   view.innerHTML = `
     <div class="panel">
+      <h2>批量登记素材目录（v0.2 · 真实元数据入库）</h2>
+      <p class="muted">扫描目录下全部 mp4/mov/webm：ffprobe 探测时长/分辨率/音轨并入库，重复文件自动跳过。</p>
+      <div class="form-row" style="grid-template-columns: 3fr auto">
+        <div><label>素材目录</label><input id="scan-dir" value="D:\\桌面工作\\AI project\\Video Batch ID\\Master Asset"></div>
+        <button id="btn-scan">扫描入库 →</button>
+      </div>
+      <div id="scan-result" style="margin-top:12px"></div>
+    </div>
+    <div class="panel">
       <h2>① 上传参考视频（Master Asset）</h2>
       <p class="muted">v0.1 骨架模式登记元信息；文件本体存放接入后置。拖入一条已跑通的爆款。</p>
       <div class="form-row">
@@ -79,6 +88,17 @@ async function renderUpload() {
       </div>
     </div>
     <div id="parse-result"></div>`;
+  document.getElementById('btn-scan').onclick = async () => {
+    const btn = document.getElementById('btn-scan');
+    btn.disabled = true;
+    try {
+      const r = await api('POST', '/api/assets/scan-dir', { dir: document.getElementById('scan-dir').value });
+      document.getElementById('scan-result').innerHTML =
+        `<p>✅ 新入库 <strong>${r.count}</strong> 条${r.skipped.length ? ` · 跳过 ${r.skipped.length} 条（已存在或失败）` : ''}</p>`;
+      toast(`入库完成：${r.count} 条`);
+    } catch (e) { toast(e.message, true); }
+    btn.disabled = false;
+  };
   document.getElementById('btn-upload').onclick = async () => {
     const filename = document.getElementById('f-name').value.trim();
     const durationMs = Number(document.getElementById('f-dur').value);
@@ -88,19 +108,32 @@ async function renderUpload() {
       const { asset } = await api('POST', '/api/assets', {
         kind: 'master', filename, duration_ms: durationMs, meta: { note },
       });
-      const { parsed } = await api('POST', `/api/assets/${asset.id}/parse`, {});
-      toast(`解析完成：${parsed.shots.length} 镜头 · ${parsed.bgm.bpm ?? '?'} BPM`);
-      document.getElementById('parse-result').innerHTML = `
-        <div class="panel">
-          <h2>② 解析结果（可修正，v0.1 为 mock 解析）</h2>
-          <table><tr><th>#</th><th>时间轴</th><th>类型</th><th>画面描述</th></tr>
-          ${parsed.shots.map((s) => `<tr><td>${s.index}</td><td>${(s.startMs / 1000).toFixed(1)}s – ${(s.endMs / 1000).toFixed(1)}s</td><td>${esc(s.type)}</td><td>${esc(s.description)}</td></tr>`).join('')}
-          </table>
-          <p class="muted">文案：「${esc(parsed.transcript)}」 · BGM：${esc(parsed.bgm.style)} · 平均 ${parsed.rhythm.avgShotSec}s/镜头</p>
-          <button onclick="location.hash='#/matrix'">下一步：③ 勾选变量 →</button>
-        </div>`;
+      const { parsed, thumbs } = await api('POST', `/api/assets/${asset.id}/parse`, {});
+      toast(`解析完成：${parsed.shots.length} 镜头${thumbs ? ` · ${thumbs} 关键帧` : ''}`);
+      document.getElementById('parse-result').innerHTML = renderParseResult(parsed, thumbs);
     } catch (e) { toast(e.message, true); }
   };
+}
+
+function renderParseResult(parsed, thumbs) {
+  const pending = parsed.enrichment?.pending ?? [];
+  return `
+    <div class="panel">
+      <h2>② 解析结果（${parsed.parser}）</h2>
+      ${pending.length ? `<p class="muted">🔧 待增强维度：${pending.map((p) => esc(p)).join('、')}（VLM/Whisper 接入后点亮）</p>` : ''}
+      <table><tr><th>#</th><th>缩略图</th><th>时间轴</th><th>类型</th><th>画面描述</th></tr>
+      ${parsed.shots.map((s) => {
+        const m = String(s.description).match(/\[thumb=([^\]]+)\]/);
+        const text = String(s.description).replace(/\[thumb=[^\]]+\]/, '').trim();
+        return `<tr><td>${s.index}</td>
+          <td>${m ? `<img src="${esc(m[1])}" style="width:64px;border-radius:4px">` : '—'}</td>
+          <td>${(s.startMs / 1000).toFixed(1)}s – ${(s.endMs / 1000).toFixed(1)}s</td>
+          <td>${esc(s.type)}</td><td>${esc(text)}</td></tr>`;
+      }).join('')}
+      </table>
+      <p class="muted">BGM：${esc(parsed.bgm.style)}${parsed.bgm.bpm ? ` ${parsed.bgm.bpm} BPM` : ''} · 平均 ${parsed.rhythm.avgShotSec}s/镜头 · ${parsed.rhythm.shotCount} 镜头</p>
+      <button onclick="location.hash='#/matrix'">下一步：③ 勾选变量 →</button>
+    </div>`;
 }
 
 async function renderMatrix() {
@@ -118,10 +151,10 @@ async function renderMatrix() {
       <h2>③ 变量矩阵：勾选「变什么、锁什么」</h2>
       <div class="form-row" style="grid-template-columns: 1fr 2fr;">
         <div><label>Master 素材</label>
-          <select id="m-master">${masters.map((m) => `<option value="${m.id}" ${m.id === selected.id ? 'selected' : ''}>${esc(m.filename)}</option>`).join('')}</select>
+          <select id="m-master">${masters.map((m) => `<option value="${m.id}" ${m.id === selected.id ? 'selected' : ''}>${esc(m.filename)}${m.duration_ms ? `（${Math.round(m.duration_ms / 1000)}s）` : ''}</option>`).join('')}</select>
         </div>
         <div><label>解析摘要</label>
-          <p class="muted" style="margin:8px 0 0">${parsed ? `${parsed.shots.length} 镜头 · ${esc(parsed.bgm.style)} ${parsed.bgm.bpm ?? '?'}BPM · Hook: ${parsed.hooks.map((h) => esc(h.phrase)).join(' / ')}` : '未解析，请到 ① 页先解析'}</p>
+          <p class="muted" style="margin:8px 0 0">${parsed ? `${parsed.shots.length} 镜头 · ${esc(parsed.bgm.style)}${parsed.bgm.bpm ? ` ${parsed.bgm.bpm} BPM` : ''} · Hook: ${parsed.hooks.map((h) => esc(h.phrase)).join(' / ')}` : '未解析，请到 ① 页先解析'}</p>
         </div>
       </div>
       <div id="dim-grid" class="dim-grid" style="margin-top:16px"></div>
@@ -252,7 +285,7 @@ async function renderLineage() {
     const good = variants.filter((v) => v.review === 1).length;
     parts.push(`
       <div class="lineage-node master"><strong>Master: ${esc(master.filename)}</strong>
-        <span class="muted"> · ${variants.length} 变体 · 👍 ${good}</span>
+        <span class="muted"> · ${master.duration_ms ? Math.round(master.duration_ms / 1000) + 's · ' : ''}${variants.length} 变体 · 👍 ${good}</span>
         ${master.status === 'parsed' ? ' <span class="badge done">已解析</span>' : ''}
       </div>
       <div class="lineage">
