@@ -460,7 +460,7 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
       const media = await import('@vbid/media-probe');
       const outDir = join(DERIVED_ROOT, asset.id as string);
       mkdirSync(outDir, { recursive: true });
-      const shots = parsed.shots.slice(0, 8);
+      const shots = parsed.shots.slice(0, 12);
       for (let i = 0; i < shots.length; i++) {
         const midMs = Math.round((shots[i].startMs + shots[i].endMs) / 2);
         const name = `shot-${shots[i].index}.jpg`;
