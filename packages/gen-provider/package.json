@@ -1,0 +1,17 @@
+{
+  "name": "@vbid/gen-provider",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "生成层 Provider：统一 VariantGeneratorProvider 接口的第三方视频 API 适配器（v0.4：OpenRouter 先行，fal.ai 插槽预留）",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@vbid/pipeline": "workspace:*",
+    "@vbid/media-probe": "workspace:*"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}

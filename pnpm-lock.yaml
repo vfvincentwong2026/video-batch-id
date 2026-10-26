@@ -10,6 +10,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@vbid/gen-provider':
+        specifier: workspace:*
+        version: link:../../packages/gen-provider
       '@vbid/media-probe':
         specifier: workspace:*
         version: link:../../packages/media-probe
@@ -22,6 +25,15 @@ importers:
       '@vbid/variable-matrix':
         specifier: workspace:*
         version: link:../../packages/variable-matrix
+
+  packages/gen-provider:
+    dependencies:
+      '@vbid/media-probe':
+        specifier: workspace:*
+        version: link:../media-probe
+      '@vbid/pipeline':
+        specifier: workspace:*
+        version: link:../pipeline
 
   packages/media-probe: {}
 

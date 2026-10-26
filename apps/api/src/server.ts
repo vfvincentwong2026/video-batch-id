@@ -30,10 +30,27 @@ import { fileURLToPath } from 'node:url';
 import { openDb, newId, type DatabaseSync } from './db.ts';
 import { createMatrix, estimateCost, enabledDimensions, suggestDimensions, buildPreview } from '@vbid/variable-matrix';
 import { getParser } from '@vbid/reference-parser';
-import { runWorkflowA } from '@vbid/pipeline';
+import { runWorkflowA, getGenerator, type VariantGeneratorProvider } from '@vbid/pipeline';
+import { OpenRouterVideoProvider } from '@vbid/gen-provider';
 
 /** 派生资产（关键帧等）根目录：仓库 assets/derived（git 忽略） */
 const DERIVED_ROOT = fileURLToPath(new URL('../../../assets/derived/', import.meta.url));
+
+/** 生成层默认 provider：配置 VBID_GEN_API_KEY（或复用 VBID_VLM_API_KEY 的 OpenRouter）→ openrouter；否则 mock */
+function defaultGeneratorName(): 'openrouter' | 'mock' {
+  return (process.env.VBID_GEN_API_KEY ?? process.env.VBID_VLM_API_KEY) ? 'openrouter' : 'mock';
+}
+
+/** 解析生成 provider 实例：openrouter 每次按 Master 构造（产出落位 DERIVED_ROOT/<masterId>/variants） */
+function resolveGenerator(name: string, masterId: string): VariantGeneratorProvider {
+  if (name === 'openrouter') {
+    return new OpenRouterVideoProvider({
+      outDir: join(DERIVED_ROOT, masterId, 'variants'),
+      fileRefPrefix: `/derived/${masterId}/variants`,
+    });
+  }
+  return getGenerator(name);
+}
 
 interface Ctx {
   db: DatabaseSync;
@@ -77,7 +94,13 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
   };
 
   // ---- 健康检查 ----
-  route('GET', '/healthz', () => ({ ok: true, profile: process.env.VBID_PROFILE ?? 'local' }));
+  route('GET', '/healthz', () => ({
+    ok: true,
+    profile: process.env.VBID_PROFILE ?? 'local',
+    gen: defaultGeneratorName(),
+    genModel: defaultGeneratorName() === 'openrouter'
+      ? (process.env.VBID_GEN_MODEL ?? 'alibaba/wan-2.7') : null,
+  }));
 
   // ---- 资产 ----
   route('POST', '/api/assets', (ctx) => {
@@ -215,14 +238,18 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
     return { parsed, thumbs };
   });
 
-  // ---- 任务执行（工作流 A 第⑤–⑦步，mock 链路同步执行）----
+  // ---- 任务执行（工作流 A 第⑤–⑦步；生成层 mock / openrouter 可配，默认按环境）----
   route('POST', '/api/tasks/:id/run', async (ctx) => {
     const task = getTask(ctx.params.id);
     if (!task) return { __status: 404, error: 'task not found' };
     if (task.status === 'done') return { __status: 409, error: 'task already run' };
     const b = ctx.body as Record<string, unknown>;
     const seed = Number.isFinite(Number(b.seed)) ? Number(b.seed) : 42;
-    const { summary, task: doneTask } = await executeTask(task.id as string, seed);
+    const generatorName = b.generator === undefined ? defaultGeneratorName() : String(b.generator);
+    if (generatorName !== 'mock' && generatorName !== 'openrouter') {
+      return { __status: 400, error: "generator must be 'mock' or 'openrouter'" };
+    }
+    const { summary, task: doneTask } = await executeTask(task.id as string, seed, generatorName);
     return { summary, task: doneTask };
   });
 
@@ -304,8 +331,9 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
        VALUES (?, ?, ?, ?, ?, ?)`,
     ).run(taskId, master.id as string, JSON.stringify(matrix), variantCount, cost.ratePerVariantUsd, cost.estimatedCostUsd);
 
-    // 4) 执行并汇总
-    const { summary } = await executeTask(taskId, 42);
+    // 4) 执行并汇总（演示默认 mock 链路：秒级、零费用；传 generator:'openrouter' 可切真实生成）
+    const demoGenerator = b.generator === 'openrouter' ? 'openrouter' : 'mock';
+    const { summary } = await executeTask(taskId, 42, demoGenerator);
     return {
       __status: 201,
       demo: true,
@@ -483,6 +511,7 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
   async function executeTask(
     taskId: string,
     seed: number,
+    generatorName = defaultGeneratorName(),
   ): Promise<{ summary: Record<string, unknown>; task: Record<string, unknown> }> {
     const task = getTask(taskId);
     if (!task) throw new Error('task not found');
@@ -491,16 +520,22 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
     const matrix = createMatrix(JSON.parse(task.matrix_json as string).dimensions);
 
     db.prepare(`UPDATE tasks SET status = 'generating' WHERE id = ?`).run(taskId);
+    let actualCostUsd = 0;
+    const masterMeta = JSON.parse((master.meta_json as string | null) ?? '{}') as { parse?: import('@vbid/reference-parser').ParsedReference };
     const result = await runWorkflowA({
       masterAssetId: master.id as string,
       masterFilename: master.filename as string,
+      masterFilePath: (master.file_path as string | null) ?? undefined,
+      parsed: masterMeta.parse,
       durationMs: Number(master.duration_ms ?? 11000),
       variantCount: Number(task.variant_count),
       seed,
       dimensions: matrix.dimensions,
     }, {
+      generator: resolveGenerator(generatorName, master.id as string),
       onVariant: (v) => {
         const vid = newId('var');
+        if (typeof v.generated.usageCostUsd === 'number') actualCostUsd += v.generated.usageCostUsd;
         db.prepare(
           `INSERT INTO assets (id, kind, filename, parent_id, task_id, status, meta_json, review)
            VALUES (?, 'variant', ?, ?, ?, ?, ?, NULL)`,
@@ -513,6 +548,11 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
             descriptor: v.generated.descriptor,
             fingerprint: v.generated.fingerprint,
             guards: { fidelity: v.fidelity, dedup: v.dedup },
+            gen: {
+              generator: v.generated.generator,
+              jobId: v.generated.jobId ?? null,
+              usageCostUsd: v.generated.usageCostUsd ?? null,
+            },
           }),
         );
       },
@@ -527,6 +567,8 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
         acceptedCount: result.acceptedCount,
         rejectedCount: result.rejectedCount,
         estimatedCostUsd: result.cost.estimatedCostUsd,
+        generator: generatorName,
+        actualCostUsd: Number(actualCostUsd.toFixed(4)),
       },
       task: getTask(taskId)!,
     };
@@ -558,7 +600,14 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
       if (!filePath.startsWith(normalize(DERIVED_ROOT))) { json(res, 403, { error: 'forbidden' }); return; }
       try {
         const content = await readFile(filePath);
-        res.writeHead(200, { 'content-type': 'image/jpeg' });
+        const mediaTypes: Record<string, string> = {
+          '.jpg': 'image/jpeg',
+          '.jpeg': 'image/jpeg',
+          '.png': 'image/png',
+          '.mp4': 'video/mp4',
+          '.webm': 'video/webm',
+        };
+        res.writeHead(200, { 'content-type': mediaTypes[extname(filePath).toLowerCase()] ?? 'application/octet-stream' });
         res.end(content);
         return;
       } catch {
@@ -602,5 +651,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     console.log(`[vbid-api] parser: ${process.env.VBID_VLM_API_KEY
       ? `vlm-api (${process.env.VBID_VLM_MODEL ?? 'gpt-4o-mini'}, ${process.env.VBID_VLM_BASE_URL ?? 'https://api.openai.com/v1'})`
       : 'ffmpeg-shotcut（设置 VBID_VLM_API_KEY 升级为 vlm-api 语义解析）'}`);
+    const gen = (process.env.VBID_GEN_API_KEY ?? process.env.VBID_VLM_API_KEY) ? 'openrouter' : 'mock';
+    console.log(`[vbid-api] generator: ${gen === 'openrouter'
+      ? `openrouter-video (${process.env.VBID_GEN_MODEL ?? 'alibaba/wan-2.7'}，I2V 首帧锚定，真实扣费)`
+      : 'mock（设置 VBID_GEN_API_KEY 接入 OpenRouter 真实生成）'}`);
   });
 }
