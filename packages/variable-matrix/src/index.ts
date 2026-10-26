@@ -402,9 +402,10 @@ export function suggestDimensions(
     reasons.push({ key: 'audio', reason: '无声素材 → 音频变量默认锁定', confidence: 'high' });
   }
 
-  // 技术：真实解析器产出 → 推荐
+  // 技术：真实解析器产出（shotcut 或 vlm-api）→ 推荐
   const technical = dims.find((d) => d.key === 'technical')!;
-  if (parsed.parser === 'ffmpeg-shotcut') {
+  const realParse = parsed.parser === 'ffmpeg-shotcut' || parsed.parser === 'vlm-api';
+  if (realParse) {
     technical.enabled = true;
     reasons.push({
       key: 'technical',
