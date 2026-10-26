@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { OpenRouterVideoProvider, buildGenPrompt } from '../src/index.ts';
+import { OpenRouterVideoProvider, buildGenPrompt, checkOpenRouterKeyBudget } from '../src/index.ts';
 import type { GenerateInput } from '@vbid/pipeline';
 
 const MP4 = Buffer.concat([Buffer.from([0, 0, 0, 32]), Buffer.from('ftypisom'), Buffer.alloc(128)]);
@@ -146,4 +146,20 @@ test('buildGenPrompt：变量取值 + Hook + 转录 + 首帧锚定说明齐全',
   assert.match(prompt, /倾倒特写开屏/);
   assert.match(prompt, /Sambal Matah segar/);
   assert.match(prompt, /first frame is provided/);
+});
+
+test('checkOpenRouterKeyBudget：解析 budgets 余量与重置时间', async () => {
+  const fake = async () => new Response(JSON.stringify({
+    data: { limit: 1, usage: 1.11, budgets: [{ limit_usd: 1, spend_usd: 1.11, remaining_usd: -0.11, resets_at: '2026-11-01T00:00:00.000Z' }] },
+  }), { status: 200 });
+  const b = await checkOpenRouterKeyBudget({ apiKey: 'sk-test', baseUrl: 'https://openrouter.ai/api/v1' }, fake as unknown as typeof fetch);
+  assert.equal(b!.limitUsd, 1);
+  assert.equal(b!.remainingUsd, -0.11);
+  assert.equal(b!.resetsAt, '2026-11-01T00:00:00.000Z');
+});
+
+test('checkOpenRouterKeyBudget：未配置 key / 查询失败 → null（软失败）', async () => {
+  assert.equal(await checkOpenRouterKeyBudget({ apiKey: '' }), null);
+  const failing = async () => new Response('oops', { status: 500 });
+  assert.equal(await checkOpenRouterKeyBudget({ apiKey: 'sk-test' }, failing as unknown as typeof fetch), null);
 });

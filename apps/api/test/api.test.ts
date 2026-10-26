@@ -120,3 +120,18 @@ test('未知路由 404；坏 JSON 400', async () => {
   const res = await fetch(base + '/api/assets', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{oops' });
   assert.equal(res.status, 500); // 解析失败走 500 兜底，见 readBody
 });
+
+test('run 指定 openrouter 但无 key → 500 且信息提示配置 key', async () => {
+  const m = await api('POST', '/api/assets', { kind: 'master', filename: 'gen-guard.mp4', duration_ms: 11000 });
+  const t = await api('POST', '/api/tasks', { master_asset_id: m.data.asset.id, variant_count: 1 });
+  const r = await api('POST', `/api/tasks/${t.data.task.id}/run`, { generator: 'openrouter' });
+  assert.equal(r.status, 500);
+  assert.match(r.data.error, /VBID_GEN_API_KEY/);
+});
+
+test('run 未知 generator → 400', async () => {
+  const m = await api('POST', '/api/assets', { kind: 'master', filename: 'gen-guard2.mp4', duration_ms: 11000 });
+  const t = await api('POST', '/api/tasks', { master_asset_id: m.data.asset.id, variant_count: 1 });
+  const r = await api('POST', `/api/tasks/${t.data.task.id}/run`, { generator: 'nope' });
+  assert.equal(r.status, 400);
+});

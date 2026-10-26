@@ -31,7 +31,7 @@ import { openDb, newId, type DatabaseSync } from './db.ts';
 import { createMatrix, estimateCost, enabledDimensions, suggestDimensions, buildPreview } from '@vbid/variable-matrix';
 import { getParser } from '@vbid/reference-parser';
 import { runWorkflowA, getGenerator, type VariantGeneratorProvider } from '@vbid/pipeline';
-import { OpenRouterVideoProvider } from '@vbid/gen-provider';
+import { OpenRouterVideoProvider, checkOpenRouterKeyBudget } from '@vbid/gen-provider';
 
 /** 派生资产（关键帧等）根目录：仓库 assets/derived（git 忽略） */
 const DERIVED_ROOT = fileURLToPath(new URL('../../../assets/derived/', import.meta.url));
@@ -248,6 +248,18 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
     const generatorName = b.generator === undefined ? defaultGeneratorName() : String(b.generator);
     if (generatorName !== 'mock' && generatorName !== 'openrouter') {
       return { __status: 400, error: "generator must be 'mock' or 'openrouter'" };
+    }
+    // 真实生成预检：key 月度限额余量不足时直接 402，避免批量任务中途撞墙、已扣费作业作废
+    if (generatorName === 'openrouter') {
+      const budget = await checkOpenRouterKeyBudget();
+      if (budget && budget.remainingUsd <= 0) {
+        const reset = budget.resetsAt ? budget.resetsAt.slice(0, 10) : '次月';
+        return {
+          __status: 402,
+          error: `OpenRouter key 月度限额已用完（已用 $${budget.spendUsd.toFixed(2)} / 上限 $${budget.limitUsd.toFixed(2)}，${reset} 重置）。`
+            + `请到 OpenRouter 控制台（Keys 页）调高该 key 的 Monthly Limit，或改用 mock 演示链路。`,
+        };
+      }
     }
     const { summary, task: doneTask } = await executeTask(task.id as string, seed, generatorName);
     return { summary, task: doneTask };
