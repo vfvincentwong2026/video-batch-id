@@ -24,3 +24,6 @@ apps/api/start.ps1
 .DS_Store
 Thumbs.db
 apps/api/launch.ps1
+apps/api/batch-result.json
+apps/api/server.out.log
+apps/api/server.err.log

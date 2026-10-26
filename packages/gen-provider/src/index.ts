@@ -219,8 +219,55 @@ export class OpenRouterVideoProvider implements GenProvider {
   }
 }
 
-/** 构造生成提示词：变量取值（场景/Hook）+ 转录文案 + 首帧锚定说明，英语为主、保留原文案 */
-export function buildGenPrompt(input: GenerateInput): string {
+export interface KeyBudget {
+  limitUsd: number;
+  spendUsd: number;
+  remainingUsd: number;
+  resetsAt: string | null;
+}
+
+/**
+ * 预检：OpenRouter key 的月度限额余量（GET /auth/key，免费）。
+ * 未配置 key 或查询失败时返回 null（软失败，交由生成阶段报错/放行）。
+ * 批量生成前先查，避免把 8 条任务跑到第 3 条才撞限额墙（2026-10-26 教训：
+ * key 月度限额 $1，任务跑到一半 403，已扣费作业全部作废）。
+ */
+export async function checkOpenRouterKeyBudget(
+  opts: Pick<OpenRouterVideoOptions, 'apiKey' | 'baseUrl'> = {},
+  fetchFn?: typeof fetch,
+): Promise<KeyBudget | null> {
+  const apiKey = opts.apiKey ?? process.env.VBID_GEN_API_KEY ?? process.env.VBID_VLM_API_KEY ?? '';
+  if (!apiKey) return null;
+  const baseUrl = (opts.baseUrl
+    ?? process.env.VBID_GEN_BASE_URL
+    ?? process.env.VBID_VLM_BASE_URL
+    ?? 'https://openrouter.ai/api/v1').replace(/\/$/, '');
+  try {
+    const res = await (fetchFn ?? fetch)(`${baseUrl}/auth/key`, {
+      headers: { authorization: `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) return null;
+    const d = (await res.json()) as {
+      data?: {
+        limit?: number | null;
+        usage?: number;
+        budgets?: Array<{ limit_usd?: number; spend_usd?: number; remaining_usd?: number; resets_at?: string | null }>;
+      };
+    };
+    const b = d.data?.budgets?.[0];
+    return {
+      limitUsd: b?.limit_usd ?? d.data?.limit ?? 0,
+      spendUsd: b?.spend_usd ?? d.data?.usage ?? 0,
+      remainingUsd: b?.remaining_usd ?? 0,
+      resetsAt: b?.resets_at ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** 构造生成提示词：变量取值（场景/Hook）+ 转录文案 + 首帧锚定说明，英语为主、保留原文案 */export function buildGenPrompt(input: GenerateInput): string {
   const parts = input.matrix.dimensions
     .filter((d) => d.enabled && input.variant.assignments[d.key])
     .map((d) => {
