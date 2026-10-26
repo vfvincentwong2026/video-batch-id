@@ -446,7 +446,12 @@ async function renderMatrix() {
 // ---------- ⑤ 任务队列 ----------
 
 async function renderQueue() {
-  const { tasks } = await api('GET', '/api/tasks');
+  const [{ tasks }, health] = await Promise.all([
+    api('GET', '/api/tasks'),
+    api('GET', '/healthz').catch(() => ({ gen: 'mock', genModel: null })),
+  ]);
+  const genReal = health.gen === 'openrouter';
+  const estPerVariant = 0.10 * 5; // wan-2.7 I2V 720p 默认 $0.10/s × 5s（VBID_GEN_MODEL 可换，以官方目录为准）
   view.innerHTML = `
     <div class="panel demo-panel">
       <h2>${h('rocket', '一键演示 · 跑通端到端', 'One-click Demo')}</h2>
@@ -458,6 +463,7 @@ async function renderQueue() {
     </div>
     <div class="panel">
       <h2>${h('queue', '⑤ 任务队列', 'Task Queue')}</h2>
+      <p class="muted">${icon('zap', 14)} 生成层 Generator：<strong>${genReal ? `OpenRouter · ${esc(health.genModel)}（I2V 首帧锚定，真实扣费 ≈ $${estPerVariant.toFixed(2)}/条）` : 'mock（免费演示链路；配置 VBID_GEN_API_KEY 切换真实生成）'}</strong></p>
       ${tasks.length ? `<table><tr><th>任务</th><th>Master</th><th>变体数</th><th>预估成本</th><th>状态</th><th></th></tr>
       ${tasks.map((t) => `<tr>
         <td>${esc(t.id)}</td><td>${esc(t.master_asset_id)}</td><td>${t.variant_count}</td><td>$${t.estimated_cost_usd}</td>
@@ -497,8 +503,10 @@ async function renderQueue() {
       btn.disabled = true;
       try {
         const r = await api('POST', `/api/tasks/${btn.dataset.run}/run`, {});
-        const cap = r.summary.spaceCapped ? `（组合空间 ${r.summary.variantCount} 种 < 请求 ${r.summary.requestedCount}，已按上限产出）` : '';
-        toast(`完成${cap}：通过 ${r.summary.acceptedCount} · 拦截 ${r.summary.rejectedCount}`);
+        const cap = r.summary.spaceCapped ? `（组合空间 ${r.summary.variantCount} 种 < 请求 ${r.summary.requestedCount} 种，已按上限产出）` : '';
+        const genNote = r.summary.generator === 'openrouter'
+          ? ` · OpenRouter 实扣 $${(r.summary.actualCostUsd ?? 0).toFixed(2)}` : '';
+        toast(`完成${cap}：通过 ${r.summary.acceptedCount} · 拦截 ${r.summary.rejectedCount}${genNote}`);
         renderQueue();
       } catch (e) { toast(e.message, true); btn.disabled = false; }
     };
@@ -519,7 +527,10 @@ async function renderReview() {
           const reviewClass = v.review === 1 ? 'review-good' : v.review === 0 ? 'review-bad' : '';
           return `<div class="variant-card ${reviewClass}" data-id="${v.id}">
             <h4>${esc(v.filename)}</h4>
+            ${meta.fileRef && meta.fileRef.startsWith('/derived/') && meta.fileRef.endsWith('.mp4')
+              ? `<video class="variant-video" src="${esc(meta.fileRef)}" controls preload="metadata" muted playsinline></video>` : ''}
             <div class="desc">${esc(meta.descriptor || '')}</div>
+            ${meta.gen?.generator === 'openrouter' ? `<div class="muted" style="font-size:11px">${icon('zap', 12)} ${esc(meta.gen.generator)} · job ${esc(meta.gen.jobId ?? '')} · $${(meta.gen.usageCostUsd ?? 0).toFixed(2)}</div>` : ''}
             <div class="guards">保真 ${meta.guards?.fidelity?.score ?? '?'} ${meta.guards?.fidelity?.passed ? '✅' : '❌'} · 去重 ${meta.guards?.dedup?.score ?? '?'} ${meta.guards?.dedup?.passed ? '✅' : '❌'}</div>
             <div>${badge(v.status)}</div>
             <div class="actions">
@@ -562,6 +573,8 @@ async function renderLineage() {
         ${variants.map((v) => `<div class="lineage-node">
           ${esc(v.filename)} ${badge(v.status)}
           ${v.review === 1 ? '<span class="badge accepted">👍</span>' : v.review === 0 ? '<span class="badge rejected">👎</span>' : '<span class="badge pending">待审</span>'}
+          ${v.meta?.fileRef && String(v.meta.fileRef).startsWith('/derived/') && String(v.meta.fileRef).endsWith('.mp4')
+            ? `<div><video class="variant-video" src="${esc(v.meta.fileRef)}" controls preload="metadata" muted playsinline style="max-width:180px"></video></div>` : ''}
           <div class="muted" style="font-size:12px">${esc(v.meta?.descriptor || '')}</div>
         </div>`).join('') || emptyState('🌱', '还没有变体，先运行生成任务')}
       </div>`);

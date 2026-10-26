@@ -33,6 +33,8 @@ export interface GenerateInput {
   taskId: string;
   variant: VariantSpec;
   master: { assetId: string; filename: string };
+  /** Master 真实文件路径（本地抽首帧锚定 I2V 用；mock provider 忽略） */
+  masterFilePath?: string;
   parsed: ParsedReference;
   matrix: VariableMatrix;
 }
@@ -45,6 +47,10 @@ export interface GeneratedVariant {
   /** 结构指纹：启发式守卫的相似度比较基础。mock = 变量取值序列化；真实实现 = pHash/embedding 向量摘要 */
   fingerprint: string;
   generator: string;
+  /** 真实生成的用量成本（OpenRouter usage.cost，USD）；mock 为 null */
+  usageCostUsd?: number | null;
+  /** 供应商作业 ID（审计/对账用） */
+  jobId?: string;
 }
 
 export interface VariantGeneratorProvider {
@@ -166,6 +172,10 @@ export class HeuristicDedupGuard implements DedupGuard {
 export interface WorkflowAInput {
   masterAssetId: string;
   masterFilename: string;
+  /** Master 真实文件路径（透传给生成 provider 做首帧锚定） */
+  masterFilePath?: string;
+  /** 已解析结果（如资产库存的 VLM 解析）；提供则跳过内置解析，直接用于矩阵/生成 */
+  parsed?: ParsedReference;
   durationMs: number;
   variantCount: number;
   seed?: number;
@@ -206,13 +216,13 @@ export async function runWorkflowA(input: WorkflowAInput, deps: PipelineDeps = {
   const fidelityGuard = deps.fidelityGuard ?? new HeuristicFidelityGuard();
   const dedupGuard = deps.dedupGuard ?? new HeuristicDedupGuard();
 
-  // ① 解析
+  // ① 解析（调用方可传入已解析结果，如资产库中 VLM 解析的真实语义）
   const parseInput: ParseInput = {
     assetId: input.masterAssetId,
     filename: input.masterFilename,
     durationMs: input.durationMs,
   };
-  const parsed = await parser.parse(parseInput);
+  const parsed = input.parsed ?? await parser.parse(parseInput);
 
   // ② 变量矩阵（自定义勾选 优先；否则从解析推导）
   let matrix: VariableMatrix;
@@ -239,6 +249,7 @@ export async function runWorkflowA(input: WorkflowAInput, deps: PipelineDeps = {
       taskId,
       variant: specs[i],
       master: { assetId: input.masterAssetId, filename: input.masterFilename },
+      masterFilePath: input.masterFilePath,
       parsed,
       matrix,
     };

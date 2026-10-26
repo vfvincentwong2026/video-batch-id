@@ -8,6 +8,7 @@
     "@vbid/variable-matrix": "workspace:*",
     "@vbid/reference-parser": "workspace:*",
     "@vbid/pipeline": "workspace:*",
+    "@vbid/gen-provider": "workspace:*",
     "@vbid/media-probe": "workspace:*"
   },
   "scripts": {
