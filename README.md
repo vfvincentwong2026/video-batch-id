@@ -326,7 +326,7 @@ pnpm --filter @vbid/api start
 
 ### 素材视频不进仓库
 
-参考素材（Master Asset）和生成的变体视频**不提交到 Git**：体积大，且可能含客户或第三方素材的版权内容。请放在本地 `assets/` 目录（已在 `.gitignore` 中忽略），或自行管理的私有存储里。
+参考素材（Master Asset）和生成的变体视频**不提交到 Git**：体积大，且可能含客户或第三方素材的版权内容。请放在本地 `assets/` 目录，或自行管理的私有存储里。`assets/`、`Master Asset/` 以及 `*.mp4` / `*.mov` 均已在 `.gitignore` 中忽略。
 
 ### 首次使用引导（工作流 A：二创）
 
