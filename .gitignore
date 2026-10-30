@@ -27,3 +27,8 @@ apps/api/launch.ps1
 apps/api/batch-result.json
 apps/api/server.out.log
 apps/api/server.err.log
+
+# 素材视频不进仓库
+Master Asset/
+*.mp4
+*.mov
