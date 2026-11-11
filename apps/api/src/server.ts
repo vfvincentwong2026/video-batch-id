@@ -16,6 +16,7 @@
  *   POST /api/preview             Demo 效果预览：矩阵每个选项的预期效果 + 关键帧 + 样例组合
  *   POST /api/variants/:id/review 审核标记 { outcome: 'good' | 'bad' }
  *   GET  /api/lineage/:masterId   谱系树（Master + 全部变体 + 审核状态）
+ *   POST /mcp                     MCP 端点（12 个工具契约 JSON-RPC；gated 工具 two-call 审批令牌）
  *   GET  /, /app.js, /style.css   静态工作台（apps/web，零构建）
  *
  * 设计约束：状态推进由 pipeline 包驱动，本服务做 REST + 状态读写，保持可替换为 D1。
@@ -34,6 +35,7 @@ import { runWorkflowA, getGenerator, type VariantGeneratorProvider } from '@vbid
 import { OpenRouterVideoProvider, checkOpenRouterKeyBudget } from '@vbid/gen-provider';
 import { createApprovalRequest, verifyApproval } from '@vbid/governance';
 import { TIER_PRESETS, estimateTierCost } from '@vbid/shared-schema';
+import { createMcpHandler } from './mcp.ts';
 
 /** 派生资产（关键帧等）根目录：仓库 assets/derived（git 忽略） */
 const DERIVED_ROOT = fileURLToPath(new URL('../../../assets/derived/', import.meta.url));
@@ -331,14 +333,12 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
   route('GET', '/api/assets/:id/analysis', (ctx) => {
     const asset = getAsset(ctx.params.id);
     if (!asset || asset.kind !== 'master') return { __status: 404, error: 'master asset not found' };
-    const meta = JSON.parse(asset.meta_json as string) as { parse?: Record<string, unknown>; probe?: { hasAudio?: boolean } };
-    if (!meta.parse) return { __status: 409, error: 'asset not parsed yet; POST /api/assets/:id/parse first' };
-    const parsed = meta.parse as Parameters<typeof suggestDimensions>[0] & { shots: Array<{ description?: string }> };
-    const thumbs = extractThumbs(parsed.shots);
+    const a = analysisFor(asset);
+    if ('error' in a) return { __status: 409, error: a.error };
     return {
-      parsedWith: parsed.parser,
-      keyContent: buildKeyContent(parsed, thumbs),
-      suggestions: suggestDimensions(parsed, { hasAudio: meta.probe?.hasAudio }),
+      parsedWith: (JSON.parse(asset.meta_json as string) as { parse?: { parser?: string } }).parse?.parser,
+      keyContent: a.keyContent,
+      suggestions: a.suggestions,
     };
   });
 
@@ -690,8 +690,8 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
     };
   }
 
-  /** P1 知识四层之写入（raw/topic/rule；manual/qa 由后续界面与 P3 Skill 注册写入） */
-  function writeKnowledge(layer: 'raw' | 'topic' | 'rule', subjectKey: string, content: unknown, source: string): void {
+  /** P1 知识四层之写入（raw/topic/rule 自动沉淀；manual/qa 由 MCP write_knowledge 与后续界面写入） */
+  function writeKnowledge(layer: 'raw' | 'topic' | 'rule' | 'manual' | 'qa', subjectKey: string, content: unknown, source: string): void {
     db.prepare(
       `INSERT INTO knowledge_entries (id, layer, subject_key, content_json, source)
        VALUES (?, ?, ?, ?, ?)`,
@@ -706,9 +706,103 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
     ).run(newId('aud'), action, JSON.stringify(payload), costUsd);
   }
 
+  /** 关键内容分析 + 智能推荐（/analysis 路由与 MCP get_analysis/suggest_matrix 共用） */
+  function analysisFor(asset: Record<string, unknown>): { keyContent: unknown; suggestions: unknown } | { error: string } {
+    const meta = JSON.parse(asset.meta_json as string) as { parse?: Record<string, unknown>; probe?: { hasAudio?: boolean } };
+    if (!meta.parse) return { error: 'asset not parsed yet; POST /api/assets/:id/parse first' };
+    const parsed = meta.parse as Parameters<typeof suggestDimensions>[0] & { shots: Array<{ description?: string }> };
+    const thumbs = extractThumbs(parsed.shots);
+    return {
+      keyContent: buildKeyContent(parsed, thumbs),
+      suggestions: suggestDimensions(parsed, { hasAudio: meta.probe?.hasAudio }),
+    };
+  }
+
+  // ---- P2：MCP 端点（12 个工具契约，JSON-RPC over POST /mcp；审批门与 REST 共用 approvals 表）----
+  const mcpHandler = createMcpHandler({
+    db,
+    newId,
+    getAsset,
+    getTask,
+    parseMasterById: async (assetId, opts) => {
+      const asset = getAsset(assetId);
+      if (!asset) throw new Error('master not found');
+      return parseMaster(asset, { parser: opts?.parser, durationMs: Number(asset.duration_ms ?? 0) });
+    },
+    analysisFor,
+    executeTaskById: async (taskId, seed, generatorName, tier) => {
+      const { summary } = await executeTask(taskId, seed, generatorName, tier);
+      return summary;
+    },
+    writeKnowledge,
+    checkGenBudget: async () => {
+      const b = await checkOpenRouterKeyBudget();
+      return { remainingUsd: b?.remainingUsd ?? null };
+    },
+    hasGenKey: () => Boolean(process.env.VBID_GEN_API_KEY ?? process.env.VBID_VLM_API_KEY),
+  });
+
+  // ---- 权利登记（rights 平面：check_use 的数据源；REST 管理入口，Agent 经 check_use 查询）----
+  route('POST', '/api/assets/:id/rights', (ctx) => {
+    const asset = getAsset(ctx.params.id);
+    if (!asset) return { __status: 404, error: 'asset not found' };
+    const b = ctx.body as Record<string, unknown>;
+    const status = ['Cleared', 'Restricted', 'Expired'].includes(String(b.status)) ? String(b.status) : 'Cleared';
+    db.prepare(
+      `INSERT INTO rights (asset_id, license, status, channels, territories, embargo_until, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(asset_id) DO UPDATE SET
+         license = excluded.license, status = excluded.status, channels = excluded.channels,
+         territories = excluded.territories, embargo_until = excluded.embargo_until, expires_at = excluded.expires_at`,
+    ).run(
+      asset.id as string, String(b.license ?? ''),
+      status,
+      JSON.stringify(Array.isArray(b.channels) ? b.channels : []),
+      JSON.stringify(Array.isArray(b.territories) ? b.territories : ['Global']),
+      typeof b.embargo_until === 'string' ? b.embargo_until : null,
+      typeof b.expires_at === 'string' ? b.expires_at : null,
+    );
+    writeAudit('set_rights', { assetId: asset.id, status });
+    return { rights: db.prepare('SELECT * FROM rights WHERE asset_id = ?').get(asset.id as string) };
+  });
+
   const server = createServer(async (req, res) => {
     const method = req.method ?? 'GET';
     const pathname = new URL(req.url ?? '/', 'http://localhost').pathname;
+
+    // ---- P2：MCP 端点（Agent 直连生产线；跨源 Agent 需 CORS）----
+    if (pathname === '/mcp') {
+      const cors = {
+        'access-control-allow-origin': '*',
+        'access-control-allow-headers': 'content-type, authorization',
+        'access-control-allow-methods': 'POST, GET, OPTIONS',
+      };
+      if (method === 'OPTIONS') { res.writeHead(204, cors); res.end(); return; }
+      if (method === 'GET') {
+        // Streamable HTTP 的 SSE 流本端点不需要（工具调用全是请求-响应）；明确 405 引导客户端走 POST
+        res.writeHead(405, { ...cors, allow: 'POST' });
+        res.end(JSON.stringify({ error: 'Method not allowed: MCP tool calls use POST /mcp (JSON-RPC)' }));
+        return;
+      }
+      if (method === 'POST') {
+        let payload: unknown;
+        try { payload = JSON.parse(Buffer.concat(await new Promise<Buffer[]>((resolve, reject) => {
+          const chunks: Buffer[] = [];
+          req.on('data', (c) => chunks.push(c));
+          req.on('end', () => resolve(chunks));
+          req.on('error', reject);
+        })).toString('utf-8')); }
+        catch { payload = null; }
+        const { status, body, headers } = await mcpHandler(payload);
+        res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', ...cors, ...(headers ?? {}) });
+        res.end(JSON.stringify(body));
+        return;
+      }
+      res.writeHead(405, { ...cors, allow: 'POST, GET, OPTIONS' });
+      res.end(JSON.stringify({ error: 'Method not allowed' }));
+      return;
+    }
+
     for (const r of routes) {
       if (r.method !== method) continue;
       const m = r.pattern.exec(pathname);
