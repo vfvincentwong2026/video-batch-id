@@ -13,6 +13,9 @@ importers:
       '@vbid/gen-provider':
         specifier: workspace:*
         version: link:../../packages/gen-provider
+      '@vbid/governance':
+        specifier: workspace:*
+        version: link:../../packages/governance
       '@vbid/media-probe':
         specifier: workspace:*
         version: link:../../packages/media-probe
@@ -22,6 +25,9 @@ importers:
       '@vbid/reference-parser':
         specifier: workspace:*
         version: link:../../packages/reference-parser
+      '@vbid/shared-schema':
+        specifier: workspace:*
+        version: link:../../packages/shared-schema
       '@vbid/variable-matrix':
         specifier: workspace:*
         version: link:../../packages/variable-matrix
@@ -34,6 +40,12 @@ importers:
       '@vbid/pipeline':
         specifier: workspace:*
         version: link:../pipeline
+
+  packages/governance:
+    dependencies:
+      '@vbid/shared-schema':
+        specifier: workspace:*
+        version: link:../shared-schema
 
   packages/media-probe: {}
 
@@ -54,5 +66,7 @@ importers:
       '@vbid/variable-matrix':
         specifier: workspace:*
         version: link:../variable-matrix
+
+  packages/shared-schema: {}
 
   packages/variable-matrix: {}

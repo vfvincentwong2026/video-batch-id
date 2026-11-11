@@ -13,7 +13,10 @@ test('ffmpeg 工具可用（本机 winget 安装或 PATH）', () => {
   assert.ok(hasFfmpegTools(), '需要 FFmpeg；winget install Gyan.FFmpeg');
 });
 
+const hasSample = existsSync(SAMPLE); // 真实素材是本地数据不进 git；目录被移动/删除时跳过依赖它的用例
+
 test('probe：真实素材元数据（1080x1920 竖屏 + 音轨）', async (t) => {
+  if (!hasSample) return t.skip('Master Asset 素材目录不存在');
   if (!hasFfmpegTools()) return t.skip('ffmpeg unavailable');
   const p = await probe(SAMPLE);
   assert.ok(p.durationMs > 10000 && p.durationMs < 20000, `duration=${p.durationMs}`);
@@ -24,6 +27,7 @@ test('probe：真实素材元数据（1080x1920 竖屏 + 音轨）', async (t) =
 });
 
 test('detectShots：镜头片段连续、覆盖全片、至少 1 个', async (t) => {
+  if (!hasSample) return t.skip('Master Asset 素材目录不存在');
   if (!hasFfmpegTools()) return t.skip('ffmpeg unavailable');
   const p = await probe(SAMPLE);
   const spans = await detectShots(SAMPLE);
@@ -38,6 +42,7 @@ test('detectShots：镜头片段连续、覆盖全片、至少 1 个', async (t)
 });
 
 test('extractKeyframe：抽帧产出非空 JPEG', async (t) => {
+  if (!hasSample) return t.skip('Master Asset 素材目录不存在');
   if (!hasFfmpegTools()) return t.skip('ffmpeg unavailable');
   const dir = join(tmpdir(), 'vbid-media-test');
   mkdirSync(dir, { recursive: true });

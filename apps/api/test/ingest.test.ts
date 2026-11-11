@@ -1,5 +1,6 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { createApp } from '../src/server.ts';
 
 let app: ReturnType<typeof createApp>;
@@ -30,8 +31,11 @@ async function api(method: string, path: string, body?: unknown) {
 }
 
 const DIR = 'D:/桌面工作/AI project/Video Batch ID/Master Asset';
+// 真实素材目录存在才跑（素材是本地数据不进 git；目录被移动/删除时跳过，不阻塞 CI 式回归）
+const hasRealAssets = existsSync(DIR);
+const skipReason = 'Master Asset 真实素材目录不存在（素材被移动/删除），跳过真实 ingest 链路';
 
-test('scan-dir：批量登记 12 条真实素材（元数据真实、幂等去重）', async () => {
+test('scan-dir：批量登记 12 条真实素材（元数据真实、幂等去重）', { skip: !hasRealAssets && skipReason }, async () => {
   const r = await api('POST', '/api/assets/scan-dir', { dir: DIR });
   assert.equal(r.status, 201);
   assert.equal(r.data.count, 12);
@@ -57,7 +61,7 @@ test('scan-dir：非法目录 400；缺 ffmpeg 时 500（无法稳定模拟，�
   assert.equal(noDir.status, 400);
 });
 
-test('真实解析：shotcut 镜头表 + 关键帧产出 + /derived 可访问', async () => {
+test('真实解析：shotcut 镜头表 + 关键帧产出 + /derived 可访问', { skip: !hasRealAssets && skipReason }, async () => {
   const list = await api('GET', '/api/assets?kind=master');
   const target = list.data.assets.find((a: { filename: string }) => a.filename.includes('edit 11'));
   assert.ok(target, '需要 scan-dir 已登记');

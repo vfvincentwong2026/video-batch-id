@@ -1,0 +1,28 @@
+# 审批门（照 ai-native-dam policies/approval-gates.yml 格式）
+# resource_key 绑定审批令牌到具体资源，防止令牌被挪用到别的任务。
+gates:
+  create_task:
+    risk: medium
+    method: elicitation_or_token
+    resource_key: "task:create:{masterId}"
+
+  submit_generation:
+    risk: high
+    method: elicitation_or_token
+    resource_key: "task:generate:{taskId}"
+    note: "cost-incurring；审批弹窗必须展示预估金额、条数、key 余量与档位"
+
+  record_usage:
+    risk: medium
+    method: elicitation_or_token
+    resource_key: "asset:usage:{assetId}:{channel}"
+
+  register_skill:
+    risk: high
+    method: elicitation_or_token
+    resource_key: "skill:register:{domain}"
+
+  write_knowledge:
+    risk: medium
+    method: elicitation_or_token
+    resource_key: "knowledge:write:{layer}:{subjectKey}"

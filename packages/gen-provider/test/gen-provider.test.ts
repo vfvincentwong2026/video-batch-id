@@ -96,12 +96,16 @@ test('端到端：提交 I2V 作业 → 轮询 → 下载落盘，产出 fileRef
     assert.ok(frames[0].image_url.url.startsWith('data:image/jpeg;base64,'));
     assert.match(String(submit.prompt), /厨房台面/);
     assert.match(String(submit.prompt), /Sambal Matah segar/);
+    assert.equal(submit.generate_audio, true); // 默认有声
 
     // 产出：落盘 mp4 + fileRef + 用量 + 作业 ID
     assert.equal(out.generator, 'openrouter');
     assert.equal(out.fileRef, '/derived/mas_test/variants/V01.mp4');
     assert.equal(out.usageCostUsd, 0.5);
     assert.equal(out.jobId, 'job1');
+    // P1 全量溯源：prompt 完整返回（不再只留 160 字符截断的 descriptor）
+    assert.ok(out.prompt!.length > 160, 'prompt 应为全量，不止 descriptor 截断长度');
+    assert.ok(out.prompt!.includes('Sambal Matah segar'));
     const saved = await readFile(join(outDir, 'V01.mp4'));
     assert.equal(saved.toString('latin1', 4, 8), 'ftyp');
     // 指纹保持 JSON 键值对数组（启发式去重守卫兼容）
@@ -138,6 +142,21 @@ test('未配置 key / Master 无真实文件 → 明确报错', async () => {
   await assert.rejects(() => p.generate(makeInput()), /VBID_GEN_API_KEY/);
   const p2 = new OpenRouterVideoProvider({ apiKey: 'sk-test', mediaImpl: fakeMedia });
   await assert.rejects(() => p2.generate(makeInput({ masterFilePath: undefined })), /masterFilePath/);});
+
+test('economy 档（P1 双档路由）：veo-3.1-lite · 4s · 无声提交', async () => {
+  const calls: Array<{ url: string; body?: unknown }> = [];
+  const p = new OpenRouterVideoProvider({
+    apiKey: 'sk-test', baseUrl: 'https://openrouter.ai/api/v1',
+    model: 'google/veo-3.1-lite', durationSec: 4, generateAudio: false, pollIntervalMs: 1,
+    fetchFn: fakeFetch({ calls }) as unknown as typeof fetch,
+    mediaImpl: fakeMedia,
+  });
+  await p.generate(makeInput());
+  const submit = calls.find((c) => c.url.endsWith('/videos'))!.body as Record<string, unknown>;
+  assert.equal(submit.model, 'google/veo-3.1-lite');
+  assert.equal(submit.duration, 4);
+  assert.equal(submit.generate_audio, false);
+});
 
 test('buildGenPrompt：变量取值 + Hook + 转录 + 首帧锚定说明齐全', () => {
   const prompt = buildGenPrompt(makeInput());

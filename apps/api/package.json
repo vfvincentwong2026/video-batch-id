@@ -9,7 +9,9 @@
     "@vbid/reference-parser": "workspace:*",
     "@vbid/pipeline": "workspace:*",
     "@vbid/gen-provider": "workspace:*",
-    "@vbid/media-probe": "workspace:*"
+    "@vbid/media-probe": "workspace:*",
+    "@vbid/shared-schema": "workspace:*",
+    "@vbid/governance": "workspace:*"
   },
   "scripts": {
     "start": "node src/server.ts",

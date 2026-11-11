@@ -10,7 +10,7 @@
  *   POST /api/tasks               创建生成任务（masterAssetId + 矩阵 + 变体数 → 预估成本）
  *   GET  /api/tasks               任务列表
  *   GET  /api/tasks/:id           任务详情（含变体进度）
- *   POST /api/tasks/:id/run       执行工作流 A（mock 链路：解析→采样→生成→双守卫→变体入库）
+ *   POST /api/tasks/:id/run       执行工作流 A（mock 直通；openrouter 走 two-call 审批门：首调 428 拿 token，确认后二调执行）
  *   POST /api/demo/run            Tunnel 演示入口：一键跑通端到端（选 Master→解析→建任务→执行）
  *   GET  /api/assets/:id/analysis 关键内容分析 + 智能变量推荐（规则引擎 v1）
  *   POST /api/preview             Demo 效果预览：矩阵每个选项的预期效果 + 关键帧 + 样例组合
@@ -32,6 +32,8 @@ import { createMatrix, estimateCost, enabledDimensions, suggestDimensions, build
 import { getParser } from '@vbid/reference-parser';
 import { runWorkflowA, getGenerator, type VariantGeneratorProvider } from '@vbid/pipeline';
 import { OpenRouterVideoProvider, checkOpenRouterKeyBudget } from '@vbid/gen-provider';
+import { createApprovalRequest, verifyApproval } from '@vbid/governance';
+import { TIER_PRESETS, estimateTierCost } from '@vbid/shared-schema';
 
 /** 派生资产（关键帧等）根目录：仓库 assets/derived（git 忽略） */
 const DERIVED_ROOT = fileURLToPath(new URL('../../../assets/derived/', import.meta.url));
@@ -41,12 +43,19 @@ function defaultGeneratorName(): 'openrouter' | 'mock' {
   return (process.env.VBID_GEN_API_KEY ?? process.env.VBID_VLM_API_KEY) ? 'openrouter' : 'mock';
 }
 
-/** 解析生成 provider 实例：openrouter 每次按 Master 构造（产出落位 DERIVED_ROOT/<masterId>/variants） */
-function resolveGenerator(name: string, masterId: string): VariantGeneratorProvider {
+/**
+ * 解析生成 provider 实例：openrouter 每次按 Master 构造（产出落位 DERIVED_ROOT/<masterId>/variants）。
+ * tier（P1 双档路由）：economy=C1 google/veo-3.1-lite 4s 无声；standard=C2 alibaba/wan-2.7 5s 有声。
+ */
+function resolveGenerator(name: string, masterId: string, tier?: 'economy' | 'standard'): VariantGeneratorProvider {
   if (name === 'openrouter') {
+    const preset = tier ? TIER_PRESETS[tier] : null;
     return new OpenRouterVideoProvider({
       outDir: join(DERIVED_ROOT, masterId, 'variants'),
       fileRefPrefix: `/derived/${masterId}/variants`,
+      ...(preset
+        ? { model: preset.model, durationSec: preset.durationSec, generateAudio: preset.generateAudio }
+        : {}),
     });
   }
   return getGenerator(name);
@@ -249,8 +258,17 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
     if (generatorName !== 'mock' && generatorName !== 'openrouter') {
       return { __status: 400, error: "generator must be 'mock' or 'openrouter'" };
     }
-    // 真实生成预检：key 月度限额余量不足时直接 402，避免批量任务中途撞墙、已扣费作业作废
+    // ---- 真实生成 two-call 审批门（P1，对齐 DAM approval-gates：high risk 永不自动批）----
+    // 第一调（无 approval_token）：预检 key + 预算 → 创建审批请求 → 428 返回 token + 预估金额 + 余量 + 档位
+    // 第二调（带 approval_token + 同参数）：verifyApproval → consumed → 执行。mock 链路（low risk）不拦截。
     if (generatorName === 'openrouter') {
+      const hasKey = Boolean(process.env.VBID_GEN_API_KEY ?? process.env.VBID_VLM_API_KEY);
+      if (!hasKey) {
+        return {
+          __status: 500,
+          error: 'openrouter generator 需要 API key：请在启动环境设置 VBID_GEN_API_KEY（OpenRouter），或改用 generator:"mock" 演示链路。',
+        };
+      }
       const budget = await checkOpenRouterKeyBudget();
       if (budget && budget.remainingUsd <= 0) {
         const reset = budget.resetsAt ? budget.resetsAt.slice(0, 10) : '次月';
@@ -260,8 +278,52 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
             + `请到 OpenRouter 控制台（Keys 页）调高该 key 的 Monthly Limit，或改用 mock 演示链路。`,
         };
       }
+      const tier: 'economy' | 'standard' = b.tier === 'economy' ? 'economy' : 'standard';
+      const gateArgs = { taskId: task.id, seed, generator: generatorName, tier };
+      const token = typeof b.approval_token === 'string' ? b.approval_token : null;
+      if (!token) {
+        const req = createApprovalRequest('submit_generation', `task:${task.id}:run`, gateArgs);
+        db.prepare(
+          `INSERT INTO approvals (id, tool, resource_key, args_json, token, status, expires_at)
+           VALUES (?, ?, ?, ?, ?, 'pending', ?)`,
+        ).run(newId('apr'), req.tool, req.resourceKey, req.argsJson, req.token, req.expiresAt);
+        return {
+          __status: 428,
+          approval_required: true,
+          approval_token: req.token,
+          tool: 'submit_generation',
+          expires_at: req.expiresAt,
+          tier,
+          tier_preset: TIER_PRESETS[tier],
+          estimated_cost_usd: estimateTierCost(tier, Number(task.variant_count)),
+          key_remaining_usd: budget?.remainingUsd ?? null,
+          variant_count: Number(task.variant_count),
+        };
+      }
+      const row = db.prepare(
+        `SELECT * FROM approvals WHERE token = ? AND status = 'pending'`,
+      ).get(token) as Record<string, unknown> | undefined;
+      if (!row) return { __status: 403, error: 'approval_token 无效或已被消费' };
+      const decision = verifyApproval(
+        {
+          tool: row.tool as string,
+          resourceKey: row.resource_key as string,
+          argsJson: row.args_json as string,
+          token: row.token as string,
+          expiresAt: row.expires_at as string,
+        },
+        token,
+        gateArgs,
+      );
+      if (!decision.ok) {
+        return { __status: 403, error: `审批校验失败: ${decision.reason ?? 'unknown'}` };
+      }
+      db.prepare(`UPDATE approvals SET status = 'consumed' WHERE id = ?`).run(row.id as string);
     }
-    const { summary, task: doneTask } = await executeTask(task.id as string, seed, generatorName);
+    const tierForRun = generatorName === 'openrouter'
+      ? ((ctx.body as Record<string, unknown>).tier === 'economy' ? 'economy' : 'standard')
+      : undefined;
+    const { summary, task: doneTask } = await executeTask(task.id as string, seed, generatorName, tierForRun);
     return { summary, task: doneTask };
   });
 
@@ -428,6 +490,17 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
     const row = getAsset(ctx.params.id);
     if (!row || row.kind !== 'variant') return { __status: 404, error: 'variant not found' };
     db.prepare(`UPDATE assets SET review = ? WHERE id = ?`).run(b.outcome === 'good' ? 1 : 0, row.id);
+    // P1 知识自动沉淀：审核 → rule 层（👍/👎 的结论与变体上下文，喂给后续 Skill 注册的门槛统计）
+    let meta: Record<string, unknown> = {};
+    try { meta = JSON.parse(row.meta_json as string) as Record<string, unknown>; } catch { /* 容忍坏 json */ }
+    writeKnowledge('rule', row.parent_id as string ?? 'global', {
+      type: 'variant_reviewed',
+      variantId: row.id,
+      outcome: b.outcome,
+      spec: meta.spec ?? null,
+      descriptor: meta.descriptor ?? null,
+    }, 'auto-review');
+    writeAudit('review_variant', { variantId: row.id, outcome: b.outcome });
     return { variant: getAsset(row.id) };
   });
 
@@ -516,14 +589,27 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
       JSON.stringify({ ...(JSON.parse(asset.meta_json as string) as object), parse: parsed }),
       asset.id as string,
     );
+    // P1 知识自动沉淀：解析完成 → raw 层（素材的结构化事实：镜头/Hook/节奏/音频）
+    writeKnowledge('raw', asset.id as string, {
+      type: 'master_parsed',
+      filename: asset.filename,
+      parser: parserName,
+      shotCount: parsed.shots?.length ?? null,
+      hooks: parsed.hooks ?? [],
+      rhythm: parsed.rhythm ?? null,
+      bgm: parsed.bgm ?? null,
+      hasTranscript: Boolean(parsed.transcript),
+      keyframesExtracted: thumbs,
+    }, 'auto-parse');
     return { parsed, thumbs };
   }
 
-  /** 执行任务（工作流 A 第⑤–⑦步）：状态推进 generating→done，逐变体入库（含守卫结果） */
+  /** 执行任务（工作流 A 第⑤–⑦步）：状态推进 generating→done，逐变体入库（含守卫结果 + 全量 prompt 溯源） */
   async function executeTask(
     taskId: string,
     seed: number,
     generatorName = defaultGeneratorName(),
+    tier?: 'economy' | 'standard',
   ): Promise<{ summary: Record<string, unknown>; task: Record<string, unknown> }> {
     const task = getTask(taskId);
     if (!task) throw new Error('task not found');
@@ -544,7 +630,7 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
       seed,
       dimensions: matrix.dimensions,
     }, {
-      generator: resolveGenerator(generatorName, master.id as string),
+      generator: resolveGenerator(generatorName, master.id as string, tier),
       onVariant: (v) => {
         const vid = newId('var');
         if (typeof v.generated.usageCostUsd === 'number') actualCostUsd += v.generated.usageCostUsd;
@@ -558,6 +644,7 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
             spec: v.spec,
             fileRef: v.generated.fileRef,
             descriptor: v.generated.descriptor,
+            prompt: v.generated.prompt ?? null,
             fingerprint: v.generated.fingerprint,
             guards: { fidelity: v.fidelity, dedup: v.dedup },
             gen: {
@@ -570,6 +657,22 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
       },
     });
     db.prepare(`UPDATE tasks SET status = 'done' WHERE id = ?`).run(taskId);
+    // P1 知识自动沉淀：任务完成 → topic 层（哪个 Master × 矩阵 × 产出与通过率）
+    writeKnowledge('topic', master.id as string, {
+      type: 'task_completed',
+      taskId,
+      masterFilename: master.filename,
+      generator: generatorName,
+      tier: tier ?? null,
+      variantCount: result.variants.length,
+      acceptedCount: result.acceptedCount,
+      rejectedCount: result.rejectedCount,
+      actualCostUsd: Number(actualCostUsd.toFixed(4)),
+    }, 'auto-task');
+    writeAudit('task_run', {
+      taskId, masterAssetId: master.id, generator: generatorName, tier: tier ?? null,
+      acceptedCount: result.acceptedCount, variantCount: result.variants.length,
+    }, Number(actualCostUsd.toFixed(4)));
     return {
       summary: {
         requestedCount: Number(task.variant_count),
@@ -580,10 +683,27 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
         rejectedCount: result.rejectedCount,
         estimatedCostUsd: result.cost.estimatedCostUsd,
         generator: generatorName,
+        tier: tier ?? null,
         actualCostUsd: Number(actualCostUsd.toFixed(4)),
       },
       task: getTask(taskId)!,
     };
+  }
+
+  /** P1 知识四层之写入（raw/topic/rule；manual/qa 由后续界面与 P3 Skill 注册写入） */
+  function writeKnowledge(layer: 'raw' | 'topic' | 'rule', subjectKey: string, content: unknown, source: string): void {
+    db.prepare(
+      `INSERT INTO knowledge_entries (id, layer, subject_key, content_json, source)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run(newId('knl'), layer, subjectKey, JSON.stringify(content), source);
+  }
+
+  /** P1 审计：一切 cost-incurring / 状态推进写操作留痕 */
+  function writeAudit(action: string, payload: unknown, costUsd: number | null = null): void {
+    db.prepare(
+      `INSERT INTO audit_log (id, actor, action, payload_json, cost_usd)
+       VALUES (?, 'local', ?, ?, ?)`,
+    ).run(newId('aud'), action, JSON.stringify(payload), costUsd);
   }
 
   const server = createServer(async (req, res) => {

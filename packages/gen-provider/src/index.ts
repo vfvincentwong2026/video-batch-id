@@ -43,6 +43,8 @@ export interface OpenRouterVideoOptions {
   resolution?: string;
   /** 强制画幅（如 "9:16"）；缺省按 Master 探测宽高自动推断 */
   aspectRatio?: string;
+  /** 是否生成音轨（默认 true；economy 档 C1 无声省成本） */
+  generateAudio?: boolean;
   /** 轮询间隔毫秒，默认 8000（官方建议约 30s；演示场景取快） */
   pollIntervalMs?: number;
   /** 作业超时毫秒，默认 10 分钟 */
@@ -89,6 +91,7 @@ export class OpenRouterVideoProvider implements GenProvider {
       durationSec: Number(this.opts.durationSec ?? process.env.VBID_GEN_DURATION_SEC ?? 5),
       resolution: this.opts.resolution ?? process.env.VBID_GEN_RESOLUTION ?? '720p',
       aspectRatio: this.opts.aspectRatio ?? process.env.VBID_GEN_ASPECT ?? '',
+      generateAudio: this.opts.generateAudio ?? process.env.VBID_GEN_AUDIO !== 'false',
       pollIntervalMs: this.opts.pollIntervalMs ?? 8000,
       timeoutMs: this.opts.timeoutMs ?? 600_000,
       outDir: this.opts.outDir ?? '',
@@ -129,6 +132,8 @@ export class OpenRouterVideoProvider implements GenProvider {
     return {
       fileRef,
       descriptor: prompt.slice(0, 160),
+      // P1 全量溯源：完整生成提示词随变体入库（meta.gen.prompt），descriptor 仅作展示截断
+      prompt,
       // 保持与启发式去重守卫兼容：JSON 键值对数组（排序后的变量取值 + 内容哈希）
       fingerprint: JSON.stringify([
         ...Object.entries(input.variant.assignments).sort(([a], [b]) => a.localeCompare(b)),
@@ -173,6 +178,7 @@ export class OpenRouterVideoProvider implements GenProvider {
         duration: cfg.durationSec,
         resolution: cfg.resolution,
         aspect_ratio: args.aspectRatio,
+        generate_audio: cfg.generateAudio,
         frame_images: [
           { type: 'image_url', image_url: { url: args.frame }, frame_type: 'first_frame' },
         ],

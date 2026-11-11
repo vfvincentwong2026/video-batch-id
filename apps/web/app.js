@@ -463,7 +463,7 @@ async function renderQueue() {
     </div>
     <div class="panel">
       <h2>${h('queue', '⑤ 任务队列', 'Task Queue')}</h2>
-      <p class="muted">${icon('zap', 14)} 生成层 Generator：<strong>${genReal ? `OpenRouter · ${esc(health.genModel)}（I2V 首帧锚定，真实扣费 ≈ $${estPerVariant.toFixed(2)}/条）` : 'mock（免费演示链路；配置 VBID_GEN_API_KEY 切换真实生成）'}</strong></p>
+      <p class="muted">${icon('zap', 14)} 生成层 Generator：<strong>${genReal ? `OpenRouter · ${esc(health.genModel)}（I2V 首帧锚定，真实扣费 ≈ $${estPerVariant.toFixed(2)}/条；点「生成」先弹审批确认——档位/金额/余量，确认后才扣费）` : 'mock（免费演示链路；配置 VBID_GEN_API_KEY 切换真实生成）'}</strong></p>
       ${tasks.length ? `<table><tr><th>任务</th><th>Master</th><th>变体数</th><th>预估成本</th><th>状态</th><th></th></tr>
       ${tasks.map((t) => `<tr>
         <td>${esc(t.id)}</td><td>${esc(t.master_asset_id)}</td><td>${t.variant_count}</td><td>$${t.estimated_cost_usd}</td>
@@ -502,14 +502,91 @@ async function renderQueue() {
     btn.onclick = async () => {
       btn.disabled = true;
       try {
-        const r = await api('POST', `/api/tasks/${btn.dataset.run}/run`, {});
-        const cap = r.summary.spaceCapped ? `（组合空间 ${r.summary.variantCount} 种 < 请求 ${r.summary.requestedCount} 种，已按上限产出）` : '';
-        const genNote = r.summary.generator === 'openrouter'
-          ? ` · OpenRouter 实扣 $${(r.summary.actualCostUsd ?? 0).toFixed(2)}` : '';
-        toast(`完成${cap}：通过 ${r.summary.acceptedCount} · 拦截 ${r.summary.rejectedCount}${genNote}`);
-        renderQueue();
+        // 两段式审批门（P1）：真实生成首调返回 428 + approval_token → 弹确认框（档位/金额/余量）→ 二调带 token 执行
+        const res = await fetch(`/api/tasks/${btn.dataset.run}/run`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 428 && data.approval_required) {
+          btn.disabled = false;
+          const approved = await showApprovalModal(data);
+          if (!approved) { toast('已取消执行（未扣费）', true); return; }
+          btn.disabled = true;
+          const r = await api('POST', `/api/tasks/${btn.dataset.run}/run`, approved);
+          showRunResult(r);
+        } else if (!res.ok) {
+          throw new Error(data.error || `${res.status}`);
+        } else {
+          showRunResult(data);
+        }
       } catch (e) { toast(e.message, true); btn.disabled = false; }
     };
+    function showRunResult(r) {
+      const cap = r.summary.spaceCapped ? `（组合空间 ${r.summary.variantCount} 种 < 请求 ${r.summary.requestedCount} 种，已按上限产出）` : '';
+      const genNote = r.summary.generator === 'openrouter'
+        ? ` · OpenRouter 实扣 $${(r.summary.actualCostUsd ?? 0).toFixed(2)}` : '';
+      toast(`完成${cap}：通过 ${r.summary.acceptedCount} · 拦截 ${r.summary.rejectedCount}${genNote}`);
+      renderQueue();
+    }
+  });
+}
+
+/** 真实生成审批确认框：档位单选 + 条数×单价 = 总金额 + key 余量；确认返回二调参数，取消返回 null */
+function showApprovalModal(gate) {
+  return new Promise((resolve) => {
+    const perVariant = (t) => gate.tier_preset && t === gate.tier
+      ? gate.tier_preset.usdPerSecond * gate.tier_preset.durationSec
+      : null;
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal" role="dialog" aria-modal="true" aria-label="生成审批">
+        <h3>${icon('zap', 18)} 真实生成审批 · Approval Required</h3>
+        <p class="muted">本条任务将进入 <strong>OpenRouter 真实生成</strong>（cost-incurring，必批）。请选择档位后确认：</p>
+        <div class="tier-options">
+          ${['economy', 'standard'].map((t) => {
+            const p = gate.tier_preset && t === gate.tier ? gate.tier_preset
+              : { model: t === 'economy' ? 'google/veo-3.1-lite' : 'alibaba/wan-2.7', durationSec: t === 'economy' ? 4 : 5, generateAudio: t === 'standard', usdPerSecond: t === 'economy' ? 0.03 : 0.10 };
+            const per = p.usdPerSecond * p.durationSec;
+            return `<label class="tier-option ${t === gate.tier ? 'active' : ''}">
+              <input type="radio" name="tier" value="${t}" ${t === gate.tier ? 'checked' : ''}>
+              <span class="tier-name">${t === 'economy' ? 'Economy · 经济档' : 'Standard · 标准档'}</span>
+              <span class="tier-meta">${esc(p.model)} · ${p.durationSec}s · ${p.generateAudio ? '有声' : '无声'} · ≈$${per.toFixed(2)}/条</span>
+            </label>`;
+          }).join('')}
+        </div>
+        <div class="modal-summary">
+          <div>变体条数：<strong>${gate.variant_count}</strong> 条</div>
+          <div>预估金额：<strong class="cost" id="m-cost">$${gate.estimated_cost_usd.toFixed(2)}</strong></div>
+          <div>Key 余量：<strong>${gate.key_remaining_usd === null ? '未知（查询失败）' : `$${gate.key_remaining_usd.toFixed(2)}`}</strong></div>
+          <div class="muted" style="font-size:11px">令牌 ${esc(gate.approval_token.slice(0, 12))}… · ${esc(gate.expires_at.slice(0, 16).replace('T', ' '))} 过期</div>
+        </div>
+        <div class="modal-actions">
+          <button class="ghost" id="m-cancel">取消</button>
+          <button id="m-confirm">${icon('zap', 14)} 确认执行（真实扣费）</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const tierCost = {
+      economy: Number((0.03 * 4 * gate.variant_count).toFixed(2)),
+      standard: Number((0.10 * 5 * gate.variant_count).toFixed(2)),
+    };
+    overlay.querySelectorAll('input[name=tier]').forEach((radio) => {
+      radio.onchange = () => {
+        overlay.querySelectorAll('.tier-option').forEach((el) => el.classList.remove('active'));
+        radio.closest('.tier-option').classList.add('active');
+        document.getElementById('m-cost').textContent = `$${tierCost[radio.value].toFixed(2)}`;
+      };
+    });
+    const done = (val) => { overlay.remove(); resolve(val); };
+    document.getElementById('m-cancel').onclick = () => done(null);
+    document.getElementById('m-confirm').onclick = () => {
+      const tier = overlay.querySelector('input[name=tier]:checked')?.value ?? gate.tier;
+      done({ approval_token: gate.approval_token, tier, generator: 'openrouter' });
+    };
+    overlay.onclick = (e) => { if (e.target === overlay) done(null); };
   });
 }
 

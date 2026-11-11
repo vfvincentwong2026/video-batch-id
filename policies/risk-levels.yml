@@ -1,0 +1,18 @@
+# 风险分级（照 ai-native-dam policies/risk-levels.yml 语义）
+# VBID 本地实现；未来托管进 DAM 后由治理平面统一裁决，本文件转为策略数据。
+low:
+  description: 只读或幂等操作。可安全重试。
+  requires_approval: false
+  auto_approve_scopes: [Suggest, Read, Edit]
+
+medium:
+  description: 可逆写入，有审计轨迹。可用 token 审批。
+  requires_approval: true
+  approval_method: elicitation_or_token
+  auto_approve_scopes: []
+
+high:
+  description: 不可逆 / 对外 / 产生费用。必须人工确认，永不自动批准。
+  requires_approval: true
+  approval_method: elicitation_or_token
+  never_auto_approve: true

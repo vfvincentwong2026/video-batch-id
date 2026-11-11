@@ -1,0 +1,11 @@
+# 权限域（照 ai-native-dam policies/permission-scopes.yml 语义）
+scopes:
+  Suggest:
+    can: [search_assets, search_knowledge, get_lineage, suggest_matrix, check_use]
+  Read:
+    can: [Suggest 全部, parse_master, get_task, get_analysis]
+  Edit:
+    can: [Read 全部, create_task, review_variant, record_usage, write_knowledge]
+  Operate:
+    can: [Edit 全部, submit_generation, register_skill]
+note: 写操作一律过 approval-gates；Operate 域仅持有者可授予。

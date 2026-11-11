@@ -1,0 +1,16 @@
+{
+  "name": "@vbid/governance",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "治理平面本地实现：check_use 权利判定 / two-call 审批令牌 / 审计条目（纯函数，对齐 ai-native-dam governance 语义）",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@vbid/shared-schema": "workspace:*"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}

@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 
 import {
   getParser,
@@ -13,6 +14,7 @@ import {
 import { createMatrix, combinationSpace, validateMatrix } from '@vbid/variable-matrix';
 
 const SAMPLE = 'D:/桌面工作/AI project/Video Batch ID/Master Asset/Konten permen edit 11.mp4';
+const hasSample = existsSync(SAMPLE); // 真实素材是本地数据不进 git；目录被移动/删除时跳过
 
 test('mock 解析：确定性输出，4 镜头覆盖完整时长', async () => {
   const p = getParser('mock');
@@ -76,8 +78,9 @@ test('deriveMatrixHints：产出能通过矩阵校验的选项（≥2 个 Hook�
   assert.ok(combinationSpace(m) >= 4);
 });
 
-test('ShotcutParserProvider：真实镜头表（依赖 ffmpeg，缺失时自动跳过）', async (t) => {
+test('ShotcutParserProvider：真实镜头表（依赖 ffmpeg 与真实素材，缺失时自动跳过）', async (t) => {
   const { hasFfmpegTools } = await import('@vbid/media-probe');
+  if (!hasSample) return t.skip('Master Asset 素材目录不存在');
   if (!hasFfmpegTools()) return t.skip('ffmpeg unavailable');
   const p = new ShotcutParserProvider();
   const parsed = await p.parse({

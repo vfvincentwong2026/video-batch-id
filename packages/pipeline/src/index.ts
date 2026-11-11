@@ -42,8 +42,10 @@ export interface GenerateInput {
 export interface GeneratedVariant {
   /** 产出物引用。mock 为 mock:// 伪协议；真实实现为文件路径或对象存储 key */
   fileRef: string;
-  /** 生成描述（prompt 摘要），便于审核页展示 */
+  /** 生成描述（prompt 摘要，160 字符截断），便于审核页展示 */
   descriptor: string;
+  /** 完整生成提示词（P1 起全量溯源入 meta.gen.prompt；mock 可省略） */
+  prompt?: string;
   /** 结构指纹：启发式守卫的相似度比较基础。mock = 变量取值序列化；真实实现 = pHash/embedding 向量摘要 */
   fingerprint: string;
   generator: string;

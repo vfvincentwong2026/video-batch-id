@@ -1,0 +1,13 @@
+{
+  "name": "@vbid/shared-schema",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "共享契约：Provenance/Rights/Approval/Knowledge/Skill/MCP 工具类型 + 校验器（对齐 ai-native-dam shared-schema，零依赖纯 TS，未来平移 Zod）",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}
