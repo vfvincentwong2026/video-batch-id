@@ -28,3 +28,8 @@ apps/api/batch-result.json
 apps/api/server.out.log
 apps/api/server.err.log
 _refs/
+
+# local tool binaries (ffmpeg/ffprobe copies) - large, not for git
+.tooling/
+# user-provided master assets (local only)
+Master Asset/
