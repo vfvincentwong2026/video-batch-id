@@ -17,6 +17,27 @@ async function api(method, path, body) {
   return data;
 }
 
+/**
+ * P4：MCP 客户端桥——SPA 读写优先走 /mcp 工具面（REST 已 deprecated）。
+ * 业务错误以 error.code（-32042 审批 / -32043 令牌 / -32602 参数门槛）抛出，data 挂在 err.data。
+ */
+let mcpSeq = 0;
+async function mcpTool(name, args = {}) {
+  const res = await fetch('/mcp', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: ++mcpSeq, method: 'tools/call', params: { name, arguments: args } }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (data.error) {
+    const err = new Error(data.error.message);
+    err.code = data.error.code;
+    err.data = data.error.data;
+    throw err;
+  }
+  return JSON.parse(data.result.content[0].text);
+}
+
 function toast(msg, isErr = false) {
   const el = document.createElement('div');
   el.className = 'toast' + (isErr ? ' err' : '');
@@ -96,15 +117,19 @@ const SHOT_TYPE_LABEL = { hook: 'Hook 位', product: '产品位', action: '动�
 // ---------- 视图 ----------
 
 async function renderDashboard() {
-  const [assets, tasks] = await Promise.all([
-    api('GET', '/api/assets'), api('GET', '/api/tasks'),
+  // P4：读路径已切 MCP 工具面（REST /api/assets、/api/tasks 为 deprecated 兼容层）
+  const [all, taskList] = await Promise.all([
+    mcpTool('search_assets', { limit: 200 }),
+    mcpTool('list_tasks'),
   ]);
-  const masters = assets.assets.filter((a) => a.kind === 'master');
-  const variants = assets.assets.filter((a) => a.kind === 'variant');
+  const assets = all.assets;
+  const tasks = taskList.tasks;
+  const masters = assets.filter((a) => a.kind === 'master');
+  const variants = assets.filter((a) => a.kind === 'variant');
   const accepted = variants.filter((v) => v.status === 'accepted');
   const reviewed = variants.filter((v) => v.review !== null && v.review !== undefined);
   const good = variants.filter((v) => v.review === 1);
-  const cost = tasks.tasks.reduce((s, t) => s + (t.estimated_cost_usd || 0), 0);
+  const cost = tasks.reduce((s, t) => s + (t.estimated_cost_usd || 0), 0);
   view.innerHTML = `
     <div class="stats">
       <div class="stat"><div class="num">${masters.length}</div><div class="label">${icon('film', 14)} Master 素材<span class="en">Masters</span></div></div>
@@ -119,8 +144,8 @@ async function renderDashboard() {
     </div>
     <div class="panel">
       <h2>${h('clock', '最近任务', 'Recent Tasks')}</h2>
-      ${tasks.tasks.length ? `<table><tr><th>任务</th><th>Master</th><th>变体数</th><th>预估成本</th><th>状态</th></tr>
-        ${tasks.tasks.slice(0, 8).map((t) => `<tr><td>${esc(t.id)}</td><td>${esc(t.master_asset_id)}</td><td>${t.variant_count}</td><td>$${t.estimated_cost_usd}</td><td>${badge(t.status)}</td></tr>`).join('')}</table>`
+      ${tasks.length ? `<table><tr><th>任务</th><th>Master</th><th>变体数</th><th>预估成本</th><th>状态</th></tr>
+        ${tasks.slice(0, 8).map((t) => `<tr><td>${esc(t.id)}</td><td>${esc(t.master_asset_id)}</td><td>${t.variant_count}</td><td>$${t.estimated_cost_usd}</td><td>${badge(t.status)}</td></tr>`).join('')}</table>`
         : emptyState('📋', '还没有任务', '<a class="btn-link" href="#/upload">① 上传素材开始 →</a>')}
     </div>`;
 }
@@ -203,9 +228,13 @@ async function renderAnalysis(masterId) {
   box.id = 'analysis-panel';
   view.appendChild(box);
   try {
-    const a = await api('GET', `/api/assets/${masterId}/analysis`);
-    const kc = a.keyContent;
-    const reasonOf = (key) => a.suggestions.reasons.find((r) => r.key === key);
+    // P4：分析读路径走 MCP get_analysis + suggest_matrix（REST /analysis 为 deprecated 兼容层）
+    const [kc, sugg] = await Promise.all([
+      mcpTool('get_analysis', { assetId: masterId }),
+      mcpTool('suggest_matrix', { assetId: masterId }),
+    ]);
+    const a = { suggestions: sugg };
+    const reasonOf = (key) => sugg.reasons.find((r) => r.key === key);
     box.innerHTML = `
     <div class="panel">
       <h2>${h('eye', '关键内容分析', 'Key Content')}</h2>
@@ -263,7 +292,8 @@ const FALLBACK_DIMS = [
 ];
 
 async function renderMatrix() {
-  const { assets } = await api('GET', '/api/assets?kind=master');
+  // P4：Master 列表走 MCP search_assets
+  const { assets } = await mcpTool('search_assets', { kind: 'master', limit: 200 });
   if (!assets.length) {
     view.innerHTML = `<div class="panel"><h2>${h('matrix', '③ 变量矩阵', 'Variable Matrix')}</h2><p class="muted">请先 <a href="#/upload">上传 Master 素材</a>。</p></div>`;
     return;
@@ -324,12 +354,16 @@ async function renderMatrix() {
     document.getElementById('m-source').textContent = '加载中…';
     document.getElementById('m-overlay').innerHTML = '';
     try {
-      const a = await api('GET', `/api/assets/${id}/analysis`);
-      state.dims = a.suggestions.dimensions;
-      state.reasons = Object.fromEntries(a.suggestions.reasons.map((r) => [r.key, r]));
-      const overlay = a.suggestions.overlay;
+      // P4：分析读路径走 MCP get_analysis + suggest_matrix
+      const [kc, sugg] = await Promise.all([
+        mcpTool('get_analysis', { assetId: id }),
+        mcpTool('suggest_matrix', { assetId: id }),
+      ]);
+      state.dims = sugg.dimensions;
+      state.reasons = Object.fromEntries(sugg.reasons.map((r) => [r.key, r]));
+      const overlay = sugg.overlay;
       document.getElementById('m-source').textContent =
-        `${a.parsedWith} 解析 · ${a.keyContent.rhythm.shotCount} 镜头 · 规则引擎 v1 推荐${overlay ? ' + 知识回放（审核结论已加权）' : ''}（可手动调整）`;
+        `MCP 工具面 · ${kc.rhythm.shotCount} 镜头 · 规则引擎 v1 推荐${overlay ? ' + 知识回放（审核结论已加权）' : ''}（可手动调整）`;
       // P3 知识回放：审核结论驱动的 proven/avoid 标记
       if (overlay?.hints?.length) {
         document.getElementById('m-overlay').innerHTML = `<div class="overlay-hints">${overlay.hints.map((hint) => `
@@ -422,11 +456,16 @@ async function renderMatrix() {
     document.getElementById('m-create').onclick = async () => {
       const variantCount = Number(document.getElementById('m-count').value);
       try {
-        const { task } = await api('POST', '/api/tasks', {
-          master_asset_id: masterId, variant_count: variantCount,
-          matrix: { dimensions: state.dims },
-        });
-        toast(`任务已创建：${task.variant_count} 条 · 预估 $${task.estimated_cost_usd}`);
+        // P4：建任务走 MCP create_task（gated → 人工确认后代发审批令牌）
+        let token = null;
+        try { await mcpTool('create_task', { masterAssetId: masterId, variantCount }); }
+        catch (e) {
+          if (e.code !== -32042) throw e;
+          if (!window.confirm(`审批 create_task（medium risk）\n变体数：${variantCount}\n\n确认后创建生成任务。`)) return;
+          token = e.data.approval_token;
+        }
+        const r = await mcpTool('create_task', { masterAssetId: masterId, variantCount, ...(token ? { approval_token: token } : {}) });
+        toast(`任务已创建：${r.variantCount} 条 · 预估 $${r.estimatedCostUsd}`);
         location.hash = '#/queue';
       } catch (e) { toast(e.message, true); }
     };
@@ -457,10 +496,12 @@ async function renderMatrix() {
 // ---------- ⑤ 任务队列 ----------
 
 async function renderQueue() {
-  const [{ tasks }, health] = await Promise.all([
-    api('GET', '/api/tasks'),
+  // P4：任务列表走 MCP list_tasks；真实生成唯一入口 = MCP submit_generation（two-call 审批门）
+  const [taskList, health] = await Promise.all([
+    mcpTool('list_tasks').catch(() => ({ tasks: [] })),
     api('GET', '/healthz').catch(() => ({ gen: 'mock', genModel: null })),
   ]);
+  const tasks = taskList.tasks;
   const genReal = health.gen === 'openrouter';
   const estPerVariant = 0.10 * 5; // wan-2.7 I2V 720p 默认 $0.10/s × 5s（VBID_GEN_MODEL 可换，以官方目录为准）
   view.innerHTML = `
@@ -515,8 +556,16 @@ async function renderQueue() {
       const name = window.prompt('Skill 名称（如 candy-hook-recipe）：', '');
       if (!name?.trim()) return;
       try {
-        const r = await api('POST', '/api/skills/register', { name: name.trim(), task_id: btn.dataset.skillreg });
-        toast(`Skill 已注册：${r.skill.name} ${r.skill.version}`);
+        // MCP register_skill：gated → 先取审批令牌（人工确认后代发）
+        let token = null;
+        try { await mcpTool('register_skill', { name: name.trim(), taskId: btn.dataset.skillreg }); }
+        catch (e) {
+          if (e.code !== -32042) throw e;
+          if (!window.confirm(`审批 register_skill（high risk）\n名称：${name.trim()}\n来源任务：${btn.dataset.skillreg}\n\n确认后注册（写知识层 + 审计）。`)) return;
+          token = e.data.approval_token;
+        }
+        const r = await mcpTool('register_skill', { name: name.trim(), taskId: btn.dataset.skillreg, ...(token ? { approval_token: token } : {}) });
+        toast(`Skill 已注册：${r.name} ${r.version}`);
       } catch (e) { toast(e.message, true); }
     };
   });
@@ -524,23 +573,31 @@ async function renderQueue() {
     btn.onclick = async () => {
       btn.disabled = true;
       try {
-        // 两段式审批门（P1）：真实生成首调返回 428 + approval_token → 弹确认框（档位/金额/余量）→ 二调带 token 执行
-        const res = await fetch(`/api/tasks/${btn.dataset.run}/run`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({}),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (res.status === 428 && data.approval_required) {
-          btn.disabled = false;
-          const approved = await showApprovalModal(data);
-          if (!approved) { toast('已取消执行（未扣费）', true); return; }
-          btn.disabled = true;
-          const r = await api('POST', `/api/tasks/${btn.dataset.run}/run`, approved);
-          showRunResult(r);
-        } else if (!res.ok) {
-          throw new Error(data.error || `${res.status}`);
+        if (genReal) {
+          // 真实生成：MCP submit_generation 两段式审批（-32042 → 确认框 → 带令牌二调）
+          let gate = null;
+          try { await mcpTool('submit_generation', { taskId: btn.dataset.run }); }
+          catch (e) {
+            if (e.code !== -32042) throw e;
+            gate = e.data;
+          }
+          if (gate) {
+            btn.disabled = false;
+            const approved = await showApprovalModal(gate);
+            if (!approved) { toast('已取消执行（未扣费）', true); return; }
+            btn.disabled = true;
+            const r = await mcpTool('submit_generation', { taskId: btn.dataset.run, tier: approved.tier, approval_token: approved.approval_token });
+            showRunResult({ summary: r.summary });
+          }
         } else {
+          // mock 演示链路：REST run（deprecated 平面，托管后删除）
+          const res = await fetch(`/api/tasks/${btn.dataset.run}/run`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({}),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || `${res.status}`);
           showRunResult(data);
         }
       } catch (e) { toast(e.message, true); btn.disabled = false; }
@@ -615,7 +672,8 @@ function showApprovalModal(gate) {
 // ---------- ⑥ 审核 ----------
 
 async function renderReview() {
-  const { assets } = await api('GET', '/api/assets?kind=variant');
+  // P4：读走 MCP search_assets；审核走 MCP review_variant（REST 为 deprecated 兼容层）
+  const { assets } = await mcpTool('search_assets', { kind: 'variant', limit: 200 });
   view.innerHTML = `
     <div class="panel">
       <h2>${h('review', '⑥ 审核（网格视图）', 'Review')}</h2>
@@ -644,7 +702,7 @@ async function renderReview() {
       const id = btn.dataset.good || btn.dataset.bad;
       const outcome = btn.dataset.good ? 'good' : 'bad';
       try {
-        await api('POST', `/api/variants/${id}/review`, { outcome });
+        await mcpTool('review_variant', { variantId: id, outcome });
         renderReview();
       } catch (e) { toast(e.message, true); }
     };
@@ -654,22 +712,24 @@ async function renderReview() {
 // ---------- ⑧ 素材谱系 ----------
 
 async function renderLineage() {
-  const { assets } = await api('GET', '/api/assets?kind=master');
+  // P4：谱系读路径走 MCP search_assets + get_lineage
+  const { assets } = await mcpTool('search_assets', { kind: 'master', limit: 200 });
   if (!assets.length) {
     view.innerHTML = `<div class="panel"><h2>${h('lineage', '⑧ 素材谱系', 'Lineage')}</h2><p class="muted">暂无 Master，<a href="#/upload">上传第一条</a>。</p></div>`;
     return;
   }
   const parts = [];
   for (const m of assets) {
-    const { master, variants } = await api('GET', `/api/lineage/${m.id}`);
-    const good = variants.filter((v) => v.review === 1).length;
+    const { master, variants } = await mcpTool('get_lineage', { masterId: m.id });
+    const vrows = variants.map((v) => ({ ...v, meta: JSON.parse(v.meta_json || '{}') }));
+    const good = vrows.filter((v) => v.review === 1).length;
     parts.push(`
       <div class="lineage-node master"><strong>Master: ${esc(master.filename)}</strong>
-        <span class="muted"> · ${master.duration_ms ? Math.round(master.duration_ms / 1000) + 's · ' : ''}${variants.length} 变体 · 👍 ${good}</span>
+        <span class="muted"> · ${master.duration_ms ? Math.round(master.duration_ms / 1000) + 's · ' : ''}${vrows.length} 变体 · 👍 ${good}</span>
         ${master.status === 'parsed' ? ' <span class="badge done">已解析</span>' : ''}
       </div>
       <div class="lineage">
-        ${variants.map((v) => `<div class="lineage-node">
+        ${vrows.map((v) => `<div class="lineage-node">
           ${esc(v.filename)} ${badge(v.status)}
           ${v.review === 1 ? '<span class="badge accepted">👍</span>' : v.review === 0 ? '<span class="badge rejected">👎</span>' : '<span class="badge pending">待审</span>'}
           ${v.meta?.fileRef && String(v.meta.fileRef).startsWith('/derived/') && String(v.meta.fileRef).endsWith('.mp4')
@@ -684,10 +744,8 @@ async function renderLineage() {
 // ---------- 素材库 · 价值榜 ----------
 
 async function renderLibrary() {
-  const [value, all] = await Promise.all([
-    api('GET', '/api/masters/value'),
-    api('GET', '/api/library'),
-  ]);
+  // P4：价值榜无 MCP 等价工具，暂保留 REST（deprecated；托管后由 DAM 工具面补齐）
+  const value = await api('GET', '/api/masters/value');
   view.innerHTML = `
     <div class="panel">
       <h2>${h('library', 'Master 价值榜（哪个 Master 最值钱）', 'Value Board')}</h2>
@@ -711,10 +769,11 @@ async function renderLibrary() {
     </div>`;
 
   async function doSearch() {
-    const q = encodeURIComponent(document.getElementById('lib-q').value.trim());
+    const q = document.getElementById('lib-q').value.trim();
     const kind = document.getElementById('lib-kind').value;
     const status = document.getElementById('lib-status').value;
-    const r = await api('GET', `/api/library?q=${q}&kind=${kind}&status=${status}`);
+    // P4：检索走 MCP search_assets（REST /api/library 为 deprecated 兼容层）
+    const r = await mcpTool('search_assets', { ...(q ? { query: q } : {}), ...(kind ? { kind } : {}), ...(status ? { status } : {}), limit: 200 });
     document.getElementById('lib-result').innerHTML = r.assets.length
       ? `<table><tr><th>资产</th><th>类型</th><th>状态</th><th>审核</th><th>说明</th></tr>
         ${r.assets.map((a) => {
@@ -734,10 +793,12 @@ async function renderLibrary() {
 const LAYER_LABEL = { raw: 'raw · 原始事实', topic: 'topic · 任务经验', rule: 'rule · 审核规则', manual: 'manual · 人工知识', qa: 'qa · 问答' };
 
 async function renderKnowledge() {
+  // P4：Skill/知识读写走 MCP list_skills / search_knowledge（REST 为 deprecated 兼容层）
   const [knl, skills] = await Promise.all([
-    api('GET', '/api/knowledge').catch(() => ({ entries: [] })),
-    api('GET', '/api/skills').catch(() => ({ skills: [], gate: {} })),
+    mcpTool('search_knowledge', {}).catch(() => ({ entries: [] })),
+    mcpTool('list_skills').catch(() => ({ skills: [] })),
   ]);
+  const GATE = { minTasks: 3, minVariants: 8, minGoodRate: 0.6 }; // 与 server SKILL_GATE 同步（MCP list_skills 不内嵌门槛）
   const byLayer = {};
   for (const e of knl.entries) (byLayer[e.layer] ??= []).push(e);
   view.innerHTML = `
@@ -745,7 +806,7 @@ async function renderKnowledge() {
       <h2>${h('book', '⑨ 知识库 · Skill 资产', 'Knowledge & Skills')}</h2>
       <p class="muted">AI-native 学习闭环的沉淀层：解析/任务/审核自动沉淀 raw → topic → rule，达标配方注册为 versioned Skill 供 Agent 复用（MCP <code>register_skill</code> / 队列页一键注册）。</p>
       <h3 class="pv-dim">${icon('zap', 15)} Skill 资产 <span class="en">Skills</span>
-        <span class="muted" style="font-weight:400;font-size:12px">注册门槛：同 Master ≥${skills.gate.minTasks ?? 3} 任务 · ≥${skills.gate.minVariants ?? 8} 变体 · 👍率 ≥${Math.round((skills.gate.minGoodRate ?? 0.6) * 100)}%</span></h3>
+        <span class="muted" style="font-weight:400;font-size:12px">注册门槛：同 Master ≥${GATE.minTasks} 任务 · ≥${GATE.minVariants} 变体 · 👍率 ≥${Math.round(GATE.minGoodRate * 100)}%</span></h3>
       ${skills.skills.length ? `<table><tr><th>Skill</th><th>Domain</th><th>版本</th><th>状态</th><th>来源任务</th><th>样本/👍率</th></tr>
         ${skills.skills.map((s) => (s.versions.length ? s.versions : [{}]).map((v) => {
           const prov = v.provenance_json ? JSON.parse(v.provenance_json) : {};

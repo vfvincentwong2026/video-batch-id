@@ -12,7 +12,7 @@
  */
 
 import { checkUse, createApprovalRequest, verifyApproval } from '@vbid/governance';
-import { MCP_TOOLS, estimateTierCost, type McpToolContract } from '@vbid/shared-schema';
+import { MCP_TOOLS, TIER_PRESETS, estimateTierCost, type McpToolContract } from '@vbid/shared-schema';
 import { createMatrix, estimateCost } from '@vbid/variable-matrix';
 import type { DatabaseSync } from 'node:sqlite';
 
@@ -141,6 +141,25 @@ const TOOL_SCHEMAS: Record<string, { inputSchema: Record<string, unknown> }> = {
       required: ['name', 'taskId'],
     },
   },
+  list_tasks: {
+    inputSchema: {
+      type: 'object',
+      properties: { status: { type: 'string', description: 'queued/generating/done；缺省全部' } },
+    },
+  },
+  search_knowledge: {
+    inputSchema: {
+      type: 'object',
+      properties: {
+        layer: { type: 'string', enum: ['raw', 'topic', 'rule', 'manual', 'qa'] },
+        subjectKey: { type: 'string', description: '素材 id / global' },
+        limit: { type: 'integer', default: 100 },
+      },
+    },
+  },
+  list_skills: {
+    inputSchema: { type: 'object', properties: {} },
+  },
 };
 
 export interface McpDeps {
@@ -242,7 +261,7 @@ export function createMcpHandler(deps: McpDeps) {
           'SELECT id, filename, task_id, status, review, meta_json, created_at FROM assets WHERE parent_id = ? ORDER BY created_at',
         ).all(master.id as string);
         return text({
-          master: { id: master.id, filename: master.filename, status: master.status },
+          master: { id: master.id, filename: master.filename, status: master.status, duration_ms: master.duration_ms ?? null },
           variants,
         });
       }
@@ -375,9 +394,11 @@ export function createMcpHandler(deps: McpDeps) {
         return withApproval(
           'submit_generation', `task:${task.id}:submit`, { ...args, tier, seed },
           () => ({
-            taskId: task.id, tier, tierCostUsd: estimateTierCost(tier, Number(task.variant_count)),
+            taskId: task.id, tier, tier_preset: TIER_PRESETS[tier],
+            tierCostUsd: estimateTierCost(tier, Number(task.variant_count)),
             estimated_cost_usd: estimateTierCost(tier, Number(task.variant_count)),
             key_remaining_usd: budget.remainingUsd, variant_count: Number(task.variant_count),
+            expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
           }),
           async () => {
             const { summary } = await deps.executeTaskById(task.id as string, seed, 'openrouter', tier);
@@ -407,11 +428,39 @@ export function createMcpHandler(deps: McpDeps) {
         );
       }
 
+      case 'list_tasks': {
+        let sql = 'SELECT * FROM tasks';
+        const paramsSql: string[] = [];
+        if (typeof args.status === 'string') { sql += ' WHERE status = ?'; paramsSql.push(args.status); }
+        sql += ' ORDER BY created_at DESC LIMIT 200';
+        return text({ tasks: db.prepare(sql).all(...paramsSql) });
+      }
+
+      case 'search_knowledge': {
+        let sql = 'SELECT * FROM knowledge_entries WHERE 1=1';
+        const paramsSql: string[] = [];
+        if (typeof args.layer === 'string') { sql += ' AND layer = ?'; paramsSql.push(args.layer); }
+        if (typeof args.subjectKey === 'string') { sql += ' AND subject_key = ?'; paramsSql.push(args.subjectKey); }
+        sql += ' ORDER BY created_at DESC LIMIT ?';
+        paramsSql.push(String(Math.min(Number(args.limit) || 100, 500)));
+        const entries = db.prepare(sql).all(...paramsSql);
+        return text({ entries, total: entries.length });
+      }
+
+      case 'list_skills': {
+        const skills = db.prepare('SELECT * FROM skills ORDER BY created_at DESC').all() as Array<Record<string, unknown>>;
+        return text({
+          skills: skills.map((s) => ({
+            ...s,
+            versions: db.prepare('SELECT * FROM skill_versions WHERE skill_id = ? ORDER BY created_at DESC').all(s.id as string),
+          })),
+        });
+      }
+
       default:
         return rpcError(null, -32601, `tool not implemented: ${name}`);
     }
   }
-
   /** 处理一条 JSON-RPC 报文，返回响应对象（POST /mcp 共用） */
   return async function handleMcp(payload: unknown): Promise<{ status: number; body: unknown; headers?: Record<string, string> }> {
     if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {

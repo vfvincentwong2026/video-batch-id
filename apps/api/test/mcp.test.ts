@@ -53,11 +53,11 @@ test('initialize / ping / tools/list：12 个契约全量暴露（含审批语�
   assert.deepEqual(ping.data.result, {});
 
   const list = await rpc('tools/list');
-  assert.equal(list.data.result.tools.length, 12);
+  assert.equal(list.data.result.tools.length, 15);
   const names = list.data.result.tools.map((t: { name: string }) => t.name);
   for (const n of ['search_assets', 'get_lineage', 'parse_master', 'suggest_matrix', 'check_use',
     'get_analysis', 'create_task', 'review_variant', 'record_usage', 'write_knowledge',
-    'submit_generation', 'register_skill']) {
+    'submit_generation', 'register_skill', 'list_tasks', 'search_knowledge', 'list_skills']) {
     assert.ok(names.includes(n), `missing tool ${n}`);
   }
   const submit = list.data.result.tools.find((t: { name: string }) => t.name === 'submit_generation');
@@ -203,7 +203,7 @@ test('P4 Agent Card：/.well-known/agent.json 暴露 A2A 发现契约', async ()
   assert.equal(card.name, 'video-batch-id');
   assert.equal(card.protocolVersion, '0.3.0');
   assert.ok(card.mcp.endpoint.endsWith('/mcp'));
-  assert.equal(card.mcp.tools, 12);
+  assert.equal(card.mcp.tools, 15);
   assert.match(card.mcp.approval, /-32042/);
   assert.ok(Array.isArray(card.skills));
 });

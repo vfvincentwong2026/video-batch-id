@@ -51,7 +51,7 @@ report('Agent Card 发现', card.name === 'video-batch-id' && card.mcp.endpoint.
 const init = await rpc('initialize', { protocolVersion: '2024-11-05' });
 report('initialize', init.result?.serverInfo?.name === 'vbid-mcp');
 const list = await rpc('tools/list');
-report('tools/list = 12 契约', list.result.tools.length === 12);
+report('tools/list = 15 契约', list.result.tools.length === 15);
 
 // ---- 2) 素材入库（ingest 是人/REST 平面，Agent 不越权）----
 const reg = await (await fetch(base + '/api/assets', {

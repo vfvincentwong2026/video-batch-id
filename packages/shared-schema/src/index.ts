@@ -165,6 +165,9 @@ export const MCP_TOOLS: McpToolContract[] = [
   { name: 'write_knowledge', risk: 'medium', gated: true, scopes: ['Edit', 'Operate'], description: 'manual/qa 层知识写入' },
   { name: 'submit_generation', risk: 'high', gated: true, scopes: ['Operate'], description: '真实生成（cost-incurring，必批，展示金额/条数/余量/档位）' },
   { name: 'register_skill', risk: 'high', gated: true, scopes: ['Operate'], description: '把跑通的配方注册为 versioned skill' },
+  { name: 'list_tasks', risk: 'low', gated: false, scopes: ['Suggest', 'Read', 'Edit', 'Operate'], description: '任务队列列表（SPA/MCP 客户端共用）' },
+  { name: 'search_knowledge', risk: 'low', gated: false, scopes: ['Suggest', 'Read', 'Edit', 'Operate'], description: '知识分层检索（raw/topic/rule/manual/qa）' },
+  { name: 'list_skills', risk: 'low', gated: false, scopes: ['Suggest', 'Read', 'Edit', 'Operate'], description: 'Skill 资产列表（含版本与 provenance）' },
 ];
 
 export function getToolContract(name: string): McpToolContract | null {

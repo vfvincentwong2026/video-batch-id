@@ -1,6 +1,11 @@
 /**
  * apps/api —— 零依赖 HTTP 网关（node:http）。
  *
+ * ⚠️ DEPRECATED 平面（P4 裁决，SPA 已切 MCP 客户端）：除「素材摄入 / 衍生文件 / mock 演示」外，
+ * 读写一律经 POST /mcp 的 15 个工具契约；下列 REST 路由保留给 SPA 的摄入/演示/mock 链路
+ * 与过渡期兼容，托管进 ai-native-dam 后由 DAM 工具面取代并删除。
+ *   仍走 REST：POST /api/assets、/api/assets/scan-dir、/api/demo/run、/api/tasks/:id/run（mock 分支）、/derived/*
+ *
  * v0.1 路由：
  *   GET  /healthz                 健康检查
  *   POST /api/assets              登记资产（Master 上传 / 变体入库）
@@ -16,7 +21,10 @@
  *   POST /api/preview             Demo 效果预览：矩阵每个选项的预期效果 + 关键帧 + 样例组合
  *   POST /api/variants/:id/review 审核标记 { outcome: 'good' | 'bad' }
  *   GET  /api/lineage/:masterId   谱系树（Master + 全部变体 + 审核状态）
- *   POST /mcp                     MCP 端点（12 个工具契约 JSON-RPC；gated 工具 two-call 审批令牌）
+ *   POST /mcp                     MCP 端点（15 个工具契约 JSON-RPC；gated 工具 two-call 审批令牌）
+ *   POST /a2a/message/send        A2A 任务委派（只读编排 + gated draft 提案；不自动批）
+ *   GET  /a2a/tasks/:contextId    A2A 任务状态与状态迁移历史
+ *   GET  /.well-known/agent.json  Agent Card（A2A 发现契约）
  *   GET  /, /app.js, /style.css   静态工作台（apps/web，零构建）
  *
  * 设计约束：状态推进由 pipeline 包驱动，本服务做 REST + 状态读写，保持可替换为 D1。
@@ -34,8 +42,9 @@ import { getParser } from '@vbid/reference-parser';
 import { runWorkflowA, getGenerator, type VariantGeneratorProvider } from '@vbid/pipeline';
 import { OpenRouterVideoProvider, checkOpenRouterKeyBudget } from '@vbid/gen-provider';
 import { createApprovalRequest, verifyApproval } from '@vbid/governance';
-import { TIER_PRESETS, estimateTierCost } from '@vbid/shared-schema';
+import { TIER_PRESETS, estimateTierCost, MCP_TOOLS } from '@vbid/shared-schema';
 import { createMcpHandler } from './mcp.ts';
+import { createA2aHandler } from './a2a.ts';
 
 /** 派生资产（关键帧等）根目录：仓库 assets/derived（git 忽略） */
 const DERIVED_ROOT = fileURLToPath(new URL('../../../assets/derived/', import.meta.url));
@@ -743,6 +752,29 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
     hasGenKey: () => Boolean(process.env.VBID_GEN_API_KEY ?? process.env.VBID_VLM_API_KEY),
   });
 
+  // ---- P4：A2A message/send 最小任务委派（只读编排 + gated draft 提案，治理红线不破）----
+  const a2a = createA2aHandler({
+    newId,
+    getAsset,
+    getTask,
+    parseMasterById: async (assetId) => {
+      const asset = getAsset(assetId);
+      if (!asset) throw new Error('master not found');
+      return parseMaster(asset, { durationMs: Number(asset.duration_ms ?? 0) });
+    },
+    analysisFor,
+  });
+
+  route('POST', '/a2a/message/send', async (ctx) => {
+    const { status, payload } = await a2a.send(ctx.body);
+    return { __status: status, ...payload };
+  });
+
+  route('GET', '/a2a/tasks/:contextId', (ctx) => {
+    const { status, payload } = a2a.get(ctx.params.contextId);
+    return { __status: status, ...payload };
+  });
+
   // ---- P4：Agent Card（A2A 契约，格式对齐 ai-native-dam/docs/a2a-contract.md）----
   route('GET', '/.well-known/agent.json', (ctx, req) => {
     const host = req.headers.host ?? 'localhost:8000';
@@ -766,7 +798,7 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
         transport: 'streamable-http',
         endpoint: `http://${host}/mcp`,
         approval: 'gated 工具 two-call token：首调 error -32042 带 approval_token，同参数二调执行',
-        tools: 12,
+        tools: MCP_TOOLS.length,
       },
     };
   });
