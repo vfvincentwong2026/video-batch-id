@@ -714,7 +714,7 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
     const thumbs = extractThumbs(parsed.shots);
     return {
       keyContent: buildKeyContent(parsed, thumbs),
-      suggestions: suggestDimensions(parsed, { hasAudio: meta.probe?.hasAudio }),
+      suggestions: knowledgeOverlay(asset.id as string, suggestDimensions(parsed, { hasAudio: meta.probe?.hasAudio })),
     };
   }
 
@@ -735,6 +735,7 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
       return summary;
     },
     writeKnowledge,
+    registerSkill: (name, taskId, opts) => registerSkillFromTask(name, taskId, opts),
     checkGenBudget: async () => {
       const b = await checkOpenRouterKeyBudget();
       return { remainingUsd: b?.remainingUsd ?? null };
@@ -765,6 +766,144 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
     writeAudit('set_rights', { assetId: asset.id, status });
     return { rights: db.prepare('SELECT * FROM rights WHERE asset_id = ?').get(asset.id as string) };
   });
+
+  // ---- P3 学习闭环：Skill 注册门槛 + 知识回放 + 知识/技能查询端点 ----
+
+  /** Skill 注册门槛（PM 裁决，写进 docs/06）：同一 Master 下 ≥3 个已完成任务 · ≥8 条变体 · 👍率 ≥60%（按已审变体计） */
+  const SKILL_GATE = { minTasks: 3, minVariants: 8, minGoodRate: 0.6 };
+
+  function skillEligibility(masterAssetId: string): {
+    eligible: boolean; taskCount: number; variantCount: number; reviewedCount: number; goodRate: number | null;
+    reasons: string[];
+  } {
+    const taskCount = (db.prepare(
+      `SELECT COUNT(*) AS n FROM tasks WHERE master_asset_id = ? AND status = 'done'`,
+    ).get(masterAssetId) as { n: number }).n;
+    const stats = db.prepare(
+      `SELECT COUNT(*) AS total,
+              SUM(CASE WHEN review IS NOT NULL THEN 1 ELSE 0 END) AS reviewed,
+              SUM(CASE WHEN review = 1 THEN 1 ELSE 0 END) AS good
+       FROM assets WHERE parent_id = ? AND kind = 'variant'`,
+    ).get(masterAssetId) as { total: number; reviewed: number | null; good: number | null };
+    const variantCount = stats.total ?? 0;
+    const reviewed = stats.reviewed ?? 0;
+    const good = stats.good ?? 0;
+    const goodRate = reviewed ? Number((good / reviewed).toFixed(2)) : null;
+    const reasons: string[] = [];
+    if (taskCount < SKILL_GATE.minTasks) reasons.push(`已完成任务 ${taskCount}/${SKILL_GATE.minTasks}`);
+    if (variantCount < SKILL_GATE.minVariants) reasons.push(`变体 ${variantCount}/${SKILL_GATE.minVariants}`);
+    if (goodRate === null) reasons.push('尚无审核数据（👍/👎）');
+    else if (goodRate < SKILL_GATE.minGoodRate) reasons.push(`👍率 ${Math.round(goodRate * 100)}% < ${SKILL_GATE.minGoodRate * 100}%`);
+    return { eligible: reasons.length === 0, taskCount, variantCount, reviewedCount: reviewed, goodRate, reasons };
+  }
+
+  /** 从已跑通任务注册 versioned skill（REST 与 MCP register_skill 共用；门槛不达 → 抛错） */
+  function registerSkillFromTask(
+    name: string, taskId: string,
+    opts: { domain?: string; promptTemplate?: string; tier?: string } = {},
+  ): Record<string, unknown> {
+    const task = getTask(taskId);
+    if (!task) throw new Error('task not found');
+    if (task.status !== 'done') throw new Error('task not done yet（配方来源必须是已跑通的任务）');
+    const masterId = task.master_asset_id as string;
+    const gate = skillEligibility(masterId);
+    if (!gate.eligible) {
+      throw new Error(`Skill 注册门槛未达（${gate.reasons.join(' · ')}）`);
+    }
+    // 同名 Skill 复用行，版本递增；新名字则建行
+    const existing = db.prepare('SELECT * FROM skills WHERE name = ?').get(name) as Record<string, unknown> | undefined;
+    const skillId = (existing?.id as string) ?? newId('skl');
+    if (!existing) {
+      db.prepare(`INSERT INTO skills (id, name, domain, description) VALUES (?, ?, ?, ?)`)
+        .run(skillId, name, String(opts.domain ?? 'general'), `registered from task ${taskId}`);
+    }
+    const version = `v${(db.prepare('SELECT COUNT(*) AS n FROM skill_versions WHERE skill_id = ?').get(skillId) as { n: number }).n + 1}`;
+    db.prepare(
+      `INSERT INTO skill_versions (skill_id, version, recipe_json, provenance_json, status)
+       VALUES (?, ?, ?, ?, 'active')`,
+    ).run(
+      skillId, version,
+      JSON.stringify({
+        dimensions: JSON.parse(task.matrix_json as string).dimensions,
+        promptTemplate: opts.promptTemplate ?? '',
+        tier: opts.tier ?? 'standard',
+        anchorShotType: 'hook',
+      }),
+      JSON.stringify({ registeredFromTaskId: taskId, sampleCount: gate.variantCount, goodRate: gate.goodRate }),
+    );
+    writeAudit('register_skill', { skillId, name, taskId, version });
+    return { skillId, name, version, gate };
+  }
+
+  route('POST', '/api/skills/register', (ctx) => {
+    const b = ctx.body as Record<string, unknown>;
+    if (typeof b.name !== 'string' || !b.name || typeof b.task_id !== 'string') {
+      return { __status: 400, error: 'name and task_id are required' };
+    }
+    try {
+      return { __status: 201, skill: registerSkillFromTask(b.name, b.task_id, { domain: b.domain as string | undefined, promptTemplate: b.prompt_template as string | undefined, tier: b.tier as string | undefined }) };
+    } catch (e) {
+      const task = getTask(b.task_id as string);
+      return { __status: 422, error: (e as Error).message, eligibility: task ? skillEligibility(task.master_asset_id as string) : null };
+    }
+  });
+
+  route('GET', '/api/skills', () => {
+    const skills = db.prepare('SELECT * FROM skills ORDER BY created_at DESC').all() as Array<Record<string, unknown>>;
+    return {
+      skills: skills.map((s) => ({
+        ...s,
+        versions: db.prepare('SELECT * FROM skill_versions WHERE skill_id = ? ORDER BY created_at DESC').all(s.id as string),
+      })),
+      gate: SKILL_GATE,
+    };
+  });
+
+  route('GET', '/api/knowledge', (ctx, req) => {
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const layer = url.searchParams.get('layer');
+    const subjectKey = url.searchParams.get('subject_key');
+    let sql = 'SELECT * FROM knowledge_entries WHERE 1=1';
+    const args: string[] = [];
+    if (layer) { sql += ' AND layer = ?'; args.push(layer); }
+    if (subjectKey) { sql += ' AND subject_key = ?'; args.push(subjectKey); }
+    sql += ' ORDER BY created_at DESC LIMIT 500';
+    return { entries: db.prepare(sql).all(...args) };
+  });
+
+  /**
+   * P3 知识回放：把审核结论（rule 层事实）回放进变量推荐。
+   * 统计该 Master 已审变体的变量取值：👍≥2 且多于 👎 → 'proven'（提升置信）；👎 不占优 → 'avoid'（压低置信）。
+   * 叠加在 suggestions.overlay 上，不改 rule-v1 引擎本体（可解释、可回退）。
+   */
+  function knowledgeOverlay(masterAssetId: string, suggestions: unknown): unknown {
+    const rows = db.prepare(
+      `SELECT review, meta_json FROM assets WHERE parent_id = ? AND kind = 'variant' AND review IS NOT NULL`,
+    ).all(masterAssetId) as Array<{ review: number; meta_json: string }>;
+    if (rows.length === 0) return suggestions;
+    const tally = new Map<string, { good: number; bad: number }>();
+    for (const r of rows) {
+      let assignments: Record<string, string> = {};
+      try { assignments = ((JSON.parse(r.meta_json) as { spec?: { assignments?: Record<string, string> } }).spec ?? {}).assignments ?? {}; } catch { continue; }
+      for (const [dim, opt] of Object.entries(assignments)) {
+        const key = `${dim}=${opt}`;
+        const cur = tally.get(key) ?? { good: 0, bad: 0 };
+        if (r.review === 1) cur.good++; else cur.bad++;
+        tally.set(key, cur);
+      }
+    }
+    const hints: Array<Record<string, unknown>> = [];
+    for (const [key, v] of tally) {
+      const verdict = v.good >= 2 && v.good > v.bad ? 'proven' : v.bad > 0 && v.bad >= v.good ? 'avoid' : null;
+      if (verdict) {
+        const [dimension, option] = key.split('=');
+        hints.push({ dimension, option, verdict, good: v.good, bad: v.bad });
+      }
+    }
+    if (hints.length === 0) return suggestions;
+    // 建议型叠加：不改 rule-v1 的置信度标签（high/medium/low），由前端/Agent 按 verdict 加权
+    return { ...(suggestions as Record<string, unknown>), overlay: { engine: 'review-feedback', hints } };
+  }
 
   const server = createServer(async (req, res) => {
     const method = req.method ?? 'GET';

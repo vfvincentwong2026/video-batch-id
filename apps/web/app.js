@@ -68,6 +68,7 @@ const ICON_PATHS = {
   lock: '<rect x="5" y="11" width="14" height="9" rx="1.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
   keyframe: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="m5 18 5-5 3 3 3-3 3 3"/>',
   shield: '<path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6l7-3Z"/><path d="m9 12 2 2 4-4"/>',
+  book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V4a1 1 0 0 0-1-1H6.5A2.5 2.5 0 0 0 4 5.5v14Z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/><line x1="8" y1="7" x2="16" y2="7"/>',
 };
 
 function icon(name, size = 18) {
@@ -277,7 +278,7 @@ async function renderMatrix() {
         <div><label class="field">Master 素材</label>
           <select id="m-master">${assets.map((m) => `<option value="${m.id}" ${m.id === masterId ? 'selected' : ''}>${esc(m.filename)}${m.duration_ms ? `（${Math.round(m.duration_ms / 1000)}s）` : ''}</option>`).join('')}</select>
         </div>
-        <div><label class="field">智能推荐来源</label><p class="muted" id="m-source" style="margin:8px 0 0">加载中…</p></div>
+        <div><label class="field">智能推荐来源</label><p class="muted" id="m-source" style="margin:8px 0 0">加载中…</p><div id="m-overlay"></div></div>
         <div><label class="field">&nbsp;</label><button class="ghost" id="m-reload">重新分析</button></div>
       </div>
       <div id="dim-grid" class="dim-grid" style="margin-top:16px"></div>
@@ -321,12 +322,22 @@ async function renderMatrix() {
 
   async function loadSuggestions(id) {
     document.getElementById('m-source').textContent = '加载中…';
+    document.getElementById('m-overlay').innerHTML = '';
     try {
       const a = await api('GET', `/api/assets/${id}/analysis`);
       state.dims = a.suggestions.dimensions;
       state.reasons = Object.fromEntries(a.suggestions.reasons.map((r) => [r.key, r]));
+      const overlay = a.suggestions.overlay;
       document.getElementById('m-source').textContent =
-        `${a.parsedWith} 解析 · ${a.keyContent.rhythm.shotCount} 镜头 · 规则引擎 v1 推荐（可手动调整）`;
+        `${a.parsedWith} 解析 · ${a.keyContent.rhythm.shotCount} 镜头 · 规则引擎 v1 推荐${overlay ? ' + 知识回放（审核结论已加权）' : ''}（可手动调整）`;
+      // P3 知识回放：审核结论驱动的 proven/avoid 标记
+      if (overlay?.hints?.length) {
+        document.getElementById('m-overlay').innerHTML = `<div class="overlay-hints">${overlay.hints.map((hint) => `
+          <span class="overlay-hint ${hint.verdict}">
+            ${hint.verdict === 'proven' ? '✅ 已验证' : '⚠️ 建议避免'} ${esc(hint.dimension)}=${esc(hint.option)}
+            <span class="muted">👍${hint.good}/👎${hint.bad}</span>
+          </span>`).join('')}</div>`;
+      }
     } catch {
       state.dims = pendingMatrix?.masterId === id ? pendingMatrix.dims : FALLBACK_DIMS.map((d) => ({ ...d, options: [...d.options] }));
       state.reasons = {};
@@ -468,7 +479,8 @@ async function renderQueue() {
       ${tasks.map((t) => `<tr>
         <td>${esc(t.id)}</td><td>${esc(t.master_asset_id)}</td><td>${t.variant_count}</td><td>$${t.estimated_cost_usd}</td>
         <td>${badge(t.status)}</td>
-        <td>${t.status === 'queued' ? `<button class="small" data-run="${t.id}">▶ 生成</button>` : ''}</td>
+        <td>${t.status === 'queued' ? `<button class="small" data-run="${t.id}">▶ 生成</button>` : ''}
+            ${t.status === 'done' ? `<button class="small ghost" data-skillreg="${t.id}" title="门槛：同 Master ≥3 任务 · ≥8 变体 · 👍率≥60%">⚗ 注册 Skill</button>` : ''}</td>
       </tr>`).join('')}</table>` : '<p class="muted">队列为空，到 <a href="#/matrix">③ 变量矩阵</a> 创建任务，或点上方「一键演示」。</p>'}
     </div>
     <div id="run-result"></div>`;
@@ -498,6 +510,16 @@ async function renderQueue() {
     btn.disabled = false;
     btn.innerHTML = `${icon('rocket')} 一键跑通端到端`;
   };
+  document.querySelectorAll('[data-skillreg]').forEach((btn) => {
+    btn.onclick = async () => {
+      const name = window.prompt('Skill 名称（如 candy-hook-recipe）：', '');
+      if (!name?.trim()) return;
+      try {
+        const r = await api('POST', '/api/skills/register', { name: name.trim(), task_id: btn.dataset.skillreg });
+        toast(`Skill 已注册：${r.skill.name} ${r.skill.version}`);
+      } catch (e) { toast(e.message, true); }
+    };
+  });
   document.querySelectorAll('[data-run]').forEach((btn) => {
     btn.onclick = async () => {
       btn.disabled = true;
@@ -707,6 +729,48 @@ async function renderLibrary() {
   doSearch().catch(() => {});
 }
 
+// ---------- ⑨ 知识库（P3 学习闭环沉淀面板） ----------
+
+const LAYER_LABEL = { raw: 'raw · 原始事实', topic: 'topic · 任务经验', rule: 'rule · 审核规则', manual: 'manual · 人工知识', qa: 'qa · 问答' };
+
+async function renderKnowledge() {
+  const [knl, skills] = await Promise.all([
+    api('GET', '/api/knowledge').catch(() => ({ entries: [] })),
+    api('GET', '/api/skills').catch(() => ({ skills: [], gate: {} })),
+  ]);
+  const byLayer = {};
+  for (const e of knl.entries) (byLayer[e.layer] ??= []).push(e);
+  view.innerHTML = `
+    <div class="panel">
+      <h2>${h('book', '⑨ 知识库 · Skill 资产', 'Knowledge & Skills')}</h2>
+      <p class="muted">AI-native 学习闭环的沉淀层：解析/任务/审核自动沉淀 raw → topic → rule，达标配方注册为 versioned Skill 供 Agent 复用（MCP <code>register_skill</code> / 队列页一键注册）。</p>
+      <h3 class="pv-dim">${icon('zap', 15)} Skill 资产 <span class="en">Skills</span>
+        <span class="muted" style="font-weight:400;font-size:12px">注册门槛：同 Master ≥${skills.gate.minTasks ?? 3} 任务 · ≥${skills.gate.minVariants ?? 8} 变体 · 👍率 ≥${Math.round((skills.gate.minGoodRate ?? 0.6) * 100)}%</span></h3>
+      ${skills.skills.length ? `<table><tr><th>Skill</th><th>Domain</th><th>版本</th><th>状态</th><th>来源任务</th><th>样本/👍率</th></tr>
+        ${skills.skills.map((s) => (s.versions.length ? s.versions : [{}]).map((v) => {
+          const prov = v.provenance_json ? JSON.parse(v.provenance_json) : {};
+          return `<tr><td>${esc(s.name)}</td><td>${esc(s.domain)}</td><td>${esc(v.version ?? '—')}</td>
+            <td>${v.status ? badge(v.status) : '—'}</td>
+            <td class="muted">${esc(prov.registeredFromTaskId ?? s.description ?? '')}</td>
+            <td>${prov.sampleCount ?? '—'} / ${prov.goodRate === null || prov.goodRate === undefined ? '—' : Math.round(prov.goodRate * 100) + '%'}</td></tr>`;
+        }).join('')).join('')}</table>` : emptyState('⚗️', '还没有 Skill', '任务跑够门槛后，到 <a class="btn-link" href="#/queue">⑤ 任务队列</a> 点「注册 Skill」')}
+    </div>
+    <div class="panel">
+      <h3 class="pv-dim">${icon('book', 15)} 知识分层 <span class="en">Knowledge Layers</span>
+        <span class="muted" style="font-weight:400;font-size:12px">${knl.entries.length} 条</span></h3>
+      ${knl.entries.length ? Object.entries(byLayer).map(([layer, entries]) => `
+        <details class="knl-layer" ${layer === 'rule' ? 'open' : ''}>
+          <summary>${LAYER_LABEL[layer] ?? layer} <span class="muted">${entries.length} 条</span></summary>
+          <table><tr><th>主体</th><th>来源</th><th>时间</th><th>内容</th></tr>
+          ${entries.slice(0, 50).map((e) => `<tr>
+            <td class="muted">${esc(e.subject_key)}</td><td>${esc(e.source)}</td>
+            <td class="muted">${esc(String(e.created_at).slice(0, 16).replace('T', ' '))}</td>
+            <td class="muted" style="max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(e.content_json)}</td>
+          </tr>`).join('')}</table>
+        </details>`).join('') : emptyState('🧠', '还没有知识沉淀', '跑一轮 ① 解析 → ⑤ 生成 → ⑥ 审核，raw/topic/rule 会自动出现')}
+    </div>`;
+}
+
 // ---------- 路由 ----------
 
 const routes = {
@@ -717,6 +781,7 @@ const routes = {
   review: renderReview,
   lineage: renderLineage,
   library: renderLibrary,
+  knowledge: renderKnowledge,
 };
 
 async function route() {

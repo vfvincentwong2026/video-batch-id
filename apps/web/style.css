@@ -517,6 +517,22 @@ select {
 .modal-actions { display: flex; justify-content: flex-end; gap: var(--space-3); margin-top: var(--space-4); }
 
 /* ==========================================================================
+   P3 学习闭环：知识回放 hints / 知识分层面板
+   ========================================================================== */
+
+.overlay-hints { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
+.overlay-hint {
+  display: inline-flex; align-items: center; gap: var(--space-1);
+  font-size: var(--text-xs); padding: 2px var(--space-2);
+  border-radius: var(--radius-full); border: 1px solid var(--border-subtle);
+}
+.overlay-hint.proven { border-color: var(--status-success); color: var(--status-success); }
+.overlay-hint.avoid { border-color: var(--status-error); color: var(--status-error); }
+.knl-layer { margin-top: var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-2) var(--space-4); }
+.knl-layer summary { cursor: pointer; font-weight: 600; padding: var(--space-2) 0; }
+.knl-layer table { margin: var(--space-2) 0; }
+
+/* ==========================================================================
    演示面板（Tunnel 演示入口）
    ========================================================================== */
 

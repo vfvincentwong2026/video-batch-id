@@ -158,25 +158,21 @@ test('review_variant（low risk）直通并沉淀 rule 知识；write_knowledge�
   assert.equal(toolText(w2).written, true);
 });
 
-test('submit_generation：无 key 明确报错；register_skill：审批后从任务注册 v1', async () => {
+test('submit_generation：无 key 明确报错；register_skill：审批门通过后被 P3 门槛拦截（信息一致）', async () => {
   // 无 key → 工具级错误（不走审批）
   const s0 = await callTool('submit_generation', { taskId });
   assert.equal(s0.data.error.code, -32603);
   assert.match(s0.data.error.message, /VBID_GEN_API_KEY/);
 
-  // register_skill gated：审批后写入 skills + skill_versions
+  // register_skill：two-call 审批门照常工作，但审批通过后 P3 门槛（≥3 任务/≥8 变体/👍率≥60%）拒绝注册
   const g1 = await callTool('register_skill', { name: 'candy-hook-recipe', taskId, tier: 'standard' });
   assert.equal(g1.data.error.code, -32042);
   const g2 = await callTool('register_skill', {
     name: 'candy-hook-recipe', taskId, tier: 'standard',
     approval_token: g1.data.error.data.approval_token,
   });
-  const reg = toolText(g2);
-  assert.equal(reg.registered, true);
-  assert.equal(reg.version, 'v1');
-  const skill = app.db.prepare(`SELECT * FROM skill_versions WHERE skill_id = ?`).get(reg.skillId) as { status: string; provenance_json: string };
-  assert.equal(skill.status, 'active');
-  assert.match(skill.provenance_json, /registeredFromTaskId/);
+  assert.equal(g2.data.error.code, -32602);
+  assert.match(g2.data.error.message, /门槛未达/);
 });
 
 test('协议防护：坏 JSON -32700；未知方法 -32601；未知工具 -32601；GET 405 引导 POST', async () => {

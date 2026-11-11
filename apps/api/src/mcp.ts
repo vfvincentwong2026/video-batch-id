@@ -152,6 +152,7 @@ export interface McpDeps {
   analysisFor: (asset: Record<string, unknown>) => { keyContent: unknown; suggestions: unknown } | { error: string };
   executeTaskById: (taskId: string, seed: number, generatorName: string, tier?: 'economy' | 'standard') => Promise<Record<string, unknown>>;
   writeKnowledge: (layer: 'raw' | 'topic' | 'rule' | 'manual' | 'qa', subjectKey: string, content: unknown, source: string) => void;
+  registerSkill: (name: string, taskId: string, opts: { domain?: string; promptTemplate?: string; tier?: string }) => Record<string, unknown>;
   checkGenBudget: () => Promise<{ remainingUsd: number | null }>;
   hasGenKey: () => boolean;
 }
@@ -392,26 +393,16 @@ export function createMcpHandler(deps: McpDeps) {
           'register_skill', `skill:${args.name}`, args,
           () => ({ name: args.name, taskId: task.id }),
           () => {
-            const stats = db.prepare(
-              `SELECT COUNT(*) AS total, SUM(CASE WHEN review = 1 THEN 1 ELSE 0 END) AS good FROM assets WHERE task_id = ?`,
-            ).get(task.id as string) as { total: number; good: number | null };
-            const skillId = deps.newId('skl');
-            db.prepare(`INSERT INTO skills (id, name, domain, description) VALUES (?, ?, ?, ?)`)
-              .run(skillId, String(args.name), String(args.domain ?? 'general'), `registered from task ${task.id}`);
-            db.prepare(
-              `INSERT INTO skill_versions (skill_id, version, recipe_json, provenance_json, status)
-               VALUES (?, 'v1', ?, ?, 'active')`,
-            ).run(
-              skillId,
-              JSON.stringify({
-                dimensions: JSON.parse(task.matrix_json as string).dimensions,
-                promptTemplate: args.promptTemplate ?? '',
-                tier: args.tier ?? 'standard',
-                anchorShotType: 'hook',
-              }),
-              JSON.stringify({ registeredFromTaskId: task.id, sampleCount: stats.total, goodRate: stats.total ? Number(((stats.good ?? 0) / stats.total).toFixed(2)) : 0 }),
-            );
-            return text({ registered: true, skillId, version: 'v1', sampleCount: stats.total });
+            try {
+              // P3：注册门槛（≥3 任务 / ≥8 变体 / 👍率≥60%）与 REST 共用同一裁决
+              return text(deps.registerSkill(String(args.name), task.id as string, {
+                domain: args.domain as string | undefined,
+                promptTemplate: args.promptTemplate as string | undefined,
+                tier: args.tier as string | undefined,
+              }));
+            } catch (e) {
+              return rpcError(null, -32602, (e as Error).message);
+            }
           },
         );
       }
