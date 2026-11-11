@@ -195,3 +195,15 @@ test('协议防护：坏 JSON -32700；未知方法 -32601；未知工具 -32601
   assert.equal(cors.status, 204);
   assert.equal(cors.headers.get('access-control-allow-origin'), '*');
 });
+
+test('P4 Agent Card：/.well-known/agent.json 暴露 A2A 发现契约', async () => {
+  const res = await fetch(base + '/.well-known/agent.json');
+  assert.equal(res.status, 200);
+  const card = await res.json();
+  assert.equal(card.name, 'video-batch-id');
+  assert.equal(card.protocolVersion, '0.3.0');
+  assert.ok(card.mcp.endpoint.endsWith('/mcp'));
+  assert.equal(card.mcp.tools, 12);
+  assert.match(card.mcp.approval, /-32042/);
+  assert.ok(Array.isArray(card.skills));
+});

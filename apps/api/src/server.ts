@@ -743,6 +743,34 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
     hasGenKey: () => Boolean(process.env.VBID_GEN_API_KEY ?? process.env.VBID_VLM_API_KEY),
   });
 
+  // ---- P4：Agent Card（A2A 契约，格式对齐 ai-native-dam/docs/a2a-contract.md）----
+  route('GET', '/.well-known/agent.json', (ctx, req) => {
+    const host = req.headers.host ?? 'localhost:8000';
+    const skills = db.prepare('SELECT * FROM skills ORDER BY created_at DESC').all() as Array<Record<string, unknown>>;
+    return {
+      name: 'video-batch-id',
+      description: '视频二创执行体：Master 素材 → 解析 → 智能变量矩阵 → 批量生成 → 双守卫 → 审核 → Skill 蒸馏。'
+        + '治理语义（审批门/知识分层/Skill 门槛）对齐 ai-native-dam，托管目标为 packages/video-distiller。',
+      url: `http://${host}/mcp`,
+      version: '0.5.0',
+      protocolVersion: '0.3.0',
+      capabilities: { streaming: false, pushNotifications: false, stateTransitionHistory: true },
+      defaultInputModes: ['text/plain', 'application/json'],
+      defaultOutputModes: ['application/json'],
+      skills: skills.map((s) => ({
+        id: s.id, name: s.name, description: s.description, domain: s.domain,
+        versions: (db.prepare('SELECT COUNT(*) AS n FROM skill_versions WHERE skill_id = ?').get(s.id as string) as { n: number }).n,
+      })),
+      // MCP 接入说明：任何 MCP 客户端（DAM Agent / Claude Desktop / Kimi）配 mcpServers.url 即可直连
+      mcp: {
+        transport: 'streamable-http',
+        endpoint: `http://${host}/mcp`,
+        approval: 'gated 工具 two-call token：首调 error -32042 带 approval_token，同参数二调执行',
+        tools: 12,
+      },
+    };
+  });
+
   // ---- 权利登记（rights 平面：check_use 的数据源；REST 管理入口，Agent 经 check_use 查询）----
   route('POST', '/api/assets/:id/rights', (ctx) => {
     const asset = getAsset(ctx.params.id);
