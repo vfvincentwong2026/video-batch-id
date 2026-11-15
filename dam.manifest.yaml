@@ -1,0 +1,123 @@
+# dam.manifest.yaml — Video Batch ID · InstallableUnit (ADR 0009 L2 · Hostable)
+# 本文件是 DAM 托管契约的声明面：DAM 安装本单元时按此清单注册实例、
+# 批量登记 skills、并作为 MCP peer 双向通话。手工维护，改动须与
+# packages/shared-schema/src/index.ts 的 MCP_TOOLS 契约保持一致。
+apiVersion: dam.ai-native/v1
+kind: InstallableUnit
+metadata:
+  name: video-batch-id
+  repo: https://github.com/vfvincentwong2026/video-batch-id
+  branch: main
+  # 每次发版打 tag 后更新；install 审批以 commit tag 为回滚点
+  commitTag: fc08fc6
+
+packaging:
+  type: repo
+  entry: apps/api/src/server.ts   # node 原生跑 TS，无构建步
+
+runtime:
+  stack: node
+  framework: node:http            # 零依赖；node:sqlite 状态层
+  nodeVersion: '>=20'
+
+health:
+  path: /healthz
+
+mcp:
+  exposes: true
+  endpoint: /mcp
+  protocol: '2024-11-05'
+  transport: jsonrpc-http         # 现状：JSON-RPC 2.0 over plain POST（无 SSE）
+  # 差距记录：MCP Streamable HTTP 完整实现（SSE/会话恢复）列为安装后第一项
+  a2a:
+    agentCard: /.well-known/agent.json
+    messageSend: /a2a/message/send   # 只读委派，gated 零副作用（红线）
+  tools:
+    # ── 读面（low risk，免审批）────────────────────────────
+    - name: search_assets
+      risk: low
+      gated: false
+      scopes: [Suggest, Read, Edit, Operate]
+      description: 检索素材/变体（关键词、类型、状态）
+    - name: get_lineage
+      risk: low
+      gated: false
+      scopes: [Suggest, Read, Edit, Operate]
+      description: 谱系树：Master + 全部变体 + 审核状态
+    - name: parse_master
+      risk: low
+      gated: false
+      scopes: [Read, Edit, Operate]
+      description: VLM/结构解析 + 关键帧抽取
+    - name: suggest_matrix
+      risk: low
+      gated: false
+      scopes: [Suggest, Read, Edit, Operate]
+      description: 智能变量推荐（规则引擎 v1）
+    - name: check_use
+      risk: low
+      gated: false
+      scopes: [Suggest, Read, Edit, Operate]
+      description: 渠道/地区/授权检查
+    - name: get_analysis
+      risk: low
+      gated: false
+      scopes: [Read, Edit, Operate]
+      description: 关键内容分析
+    - name: review_variant
+      risk: low
+      gated: false
+      scopes: [Edit, Operate]
+      description: 审核 👍/👎（沉淀 rule 层知识）
+    - name: list_tasks
+      risk: low
+      gated: false
+      scopes: [Suggest, Read, Edit, Operate]
+      description: 任务队列列表（SPA/MCP 客户端共用）
+    - name: search_knowledge
+      risk: low
+      gated: false
+      scopes: [Suggest, Read, Edit, Operate]
+      description: 知识分层检索（raw/topic/rule/manual/qa）
+    - name: list_skills
+      risk: low
+      gated: false
+      scopes: [Suggest, Read, Edit, Operate]
+      description: Skill 资产列表（含版本与 provenance）
+    # ── 写面（gated：两段式审批 -32042 + approval_token）────
+    - name: create_task
+      risk: medium
+      gated: true
+      scopes: [Edit, Operate]
+      description: 创建生成任务
+    - name: record_usage
+      risk: medium
+      gated: true
+      scopes: [Edit, Operate]
+      description: 发布用途登记
+    - name: write_knowledge
+      risk: medium
+      gated: true
+      scopes: [Edit, Operate]
+      description: manual/qa 层知识写入
+    - name: submit_generation
+      risk: high
+      gated: true
+      scopes: [Operate]
+      description: 真实生成（cost-incurring，必批，展示金额/条数/余量/档位）
+    - name: register_skill
+      risk: high
+      gated: true
+      scopes: [Operate]
+      description: 把跑通的配方注册为 versioned skill
+
+dataBoundary:
+  storage: local-sqlite            # apps/api/vbid.sqlite（8 表，命名对齐 DAM 迁移）
+  assetDir: assets/                # 素材/产物本地盘，gitignored
+  egress:
+    - openrouter.ai                # VLM 解析 + 视频生成（economy/standard 两档）
+  # 托管后若数据边界上移 DAM Postgres：本文件 storage 改声明，schema 平移零改动
+
+skills: []                         # 安装时由 DAM 批量登记；当前注册表为空（门槛 ≥3任务/≥8变体/👍率≥60%）
+
+secrets: []                        # 零硬编码：VBID_VLM_API_KEY / VBID_GEN_API_KEY 全部 env 注入（launch.ps1，gitignored）
