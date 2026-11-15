@@ -9,7 +9,7 @@ metadata:
   repo: https://github.com/vfvincentwong2026/video-batch-id
   branch: main
   # 每次发版打 tag 后更新；install 审批以 commit tag 为回滚点
-  commitTag: fc08fc6
+  commitTag: 6dec4b3
 
 packaging:
   type: repo
