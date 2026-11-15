@@ -21,7 +21,7 @@ runtime:
   nodeVersion: '>=20'
 
 health:
-  path: /healthz
+  path: /health           # ADR 0009 标准端点（/healthz 为兼容别名）
 
 mcp:
   exposes: true

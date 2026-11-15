@@ -114,13 +114,16 @@ export function createApp(dbPath = process.env.VBID_DB_PATH ?? './vbid.sqlite') 
   };
 
   // ---- 健康检查 ----
-  route('GET', '/healthz', () => ({
+  // ADR 0009 L1 要求标准 /health；/healthz 为旧别名保留
+  const healthPayload = () => ({
     ok: true,
     profile: process.env.VBID_PROFILE ?? 'local',
     gen: defaultGeneratorName(),
     genModel: defaultGeneratorName() === 'openrouter'
       ? (process.env.VBID_GEN_MODEL ?? 'alibaba/wan-2.7') : null,
-  }));
+  });
+  route('GET', '/health', healthPayload);
+  route('GET', '/healthz', healthPayload);
 
   // ---- 资产 ----
   route('POST', '/api/assets', (ctx) => {
