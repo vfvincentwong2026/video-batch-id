@@ -33,3 +33,5 @@ _refs/
 .tooling/
 # user-provided master assets (local only)
 Master Asset/
+# local study clones (upstream repos for migration planning)
+.study/
