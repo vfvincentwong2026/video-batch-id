@@ -4,14 +4,15 @@
 
 **让一条好素材，安全地变成一百条好素材。**
 
-<sub>参考素材二创 · 变量矩阵控制 · 保真去重双守卫 · 素材谱系复利</sub>
+<sub>参考素材二创 · 变量矩阵控制 · 保真去重双守卫 · MCP-first AI-Native 执行体</sub>
 
 [![CI](https://github.com/vfvincentwong2026/video-batch-id/actions/workflows/ci.yml/badge.svg)](https://github.com/vfvincentwong2026/video-batch-id/actions)
 [![Node](https://img.shields.io/badge/node-20+-339933?logo=node.js&logoColor=white)](#技术栈)
-[![Cloudflare](https://img.shields.io/badge/cloudflare-tunnel%20%2B%20d1-F38020?logo=cloudflare&logoColor=white)](#部署模式)
+[![MCP](https://img.shields.io/badge/MCP-15%20tools-7c3aed)](#mcp-工具面15-个)
+[![A2A](https://img.shields.io/badge/A2A-agent%20card%20%2B%20message%2Fsend-orange)](#a2a-对接)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
-[痛点](#痛点) · [为什么](#为什么) · [核心概念](#核心概念) · [两条工作流](#两条工作流) · [食品案例](#案例dapur-ibu-的一条爆款如何变成三十条) · [功能](#功能) · [架构](#架构) · [快速开始](#快速开始) · [路线图](#路线图) · [English](#english)
+[痛点](#痛点) · [为什么](#为什么) · [核心概念](#核心概念) · [案例](#案例dapur-ibu-的一条爆款如何变成三十条) · [AI-Native 架构](#ai-native-架构) · [MCP 工具面](#mcp-工具面15-个) · [快速开始](#快速开始) · [路线图](#路线图) · [English](#english)
 
 </div>
 
@@ -46,8 +47,8 @@ Video Batch ID 把一条参考素材拆解成**可独立控制的变量矩阵**�
 - **变量可控，核心锁定** — 每条变体都明确知道「变了什么、没变什么」。
 - **双守卫兜底** — 保真守卫确保产品/卖点不变，去重守卫确保平台不判重。
 - **素材谱系复利** — 一个 Master 衍生 N 个变体，哪个 Master 最值钱一目了然。
-- **组装，而非重造** — 解析、变体、守卫、合成均复用成熟开源组件。
-- **印尼本地优先** — 原生支持 Bahasa Indonesia TTS、本地食品材质表现、TikTok ID / Shopee 去重特征。
+- **MCP-first，AI-Native** — 所有能力先定义为 MCP 工具契约；Web UI 只是 MCP 的一个客户端；每次解析、生成、审核都在沉淀知识与 Skill，未来整体托管进 [ai-native-dam](https://github.com/vfvincentwong2026/ai-native-dam)。
+- **印尼本地优先** — 原生支持 Bahasa Indonesia 语境、本地食品材质表现、TikTok ID / Shopee 去重特征。
 
 ---
 
@@ -66,21 +67,18 @@ Video Batch ID 把一条参考素材拆解成**可独立控制的变量矩阵**�
 | **音频** | BGM、音效强度、语速、材质音效 | 口播内容（可选锁） |
 | **技术** | 分辨率、画幅、字幕样式 | — |
 
-**食品高材质内容特别强化**（糖类、酱料、拉丝、半透明产品）：
-
-- 通透度、表面光泽、拉丝长度、粘性表现、内部液体流动感可作为视觉子变量独立控制。
-- 保真守卫会额外校验颜色一致性与半透明区域语义。
+**食品高材质内容特别强化**（糖类、酱料、拉丝、半透明产品）：通透度、表面光泽、拉丝长度、粘性表现可作为视觉子变量独立控制。
 
 运营的操作模型极简：**上传参考 → 勾选变量 → 设变体数量 → 生成**。
 
 ### 双守卫（Dual Guard）
 
-- **保真守卫**：CLIP embedding + GroundingDINO 产品区域检测 + 颜色/通透度校验，确保变体里产品外观、品牌元素、核心卖点与 Master 一致。
-- **去重守卫**：pHash + 关键帧 CLIP 距离 + 音频指纹三重检测，确保变体之间、变体与 Master 之间的相似度低于 TikTok Indonesia / Shopee 判重阈值。
+- **保真守卫**：CLIP embedding + 颜色/通透度校验，确保变体里产品外观、品牌元素、核心卖点与 Master 一致。
+- **去重守卫**：pHash + 关键帧 CLIP 距离 + 音频指纹三重检测，确保变体之间、变体与 Master 之间的相似度低于平台判重阈值。
 
-任一变体未通过守卫，自动重试或标记为「待人工复核」，**不会混入合格队列**。
+任一变体未通过守卫，自动标记为「待人工复核」，**不会混入合格队列**。
 
-### 变体谱系（Lineage）
+### 变体谱系（Lineage）与知识复利
 
 素材库不是文件夹，是**谱系树**：
 
@@ -88,121 +86,121 @@ Video Batch ID 把一条参考素材拆解成**可独立控制的变量矩阵**�
 Master: Sambal Matah 爆款 (播放 50万 · 带货 2000单)
 ├── V01 · 场景=厨房 · 模特=A · Hook=倾倒 → 播放 8万
 ├── V02 · 场景=餐厅 · 模特=B · Hook=拉丝 → 播放 12万
-├── V03 · 场景=野餐 · 模特=A · Hook=试吃 → 播放 6万
 └── ... 共 30 个变体
 ```
 
-**哪个 Master 衍生了最多好评变体，它就是最值钱的资产。** 这个信号自动回写知识层，驱动下一轮生产决策。
-
----
-
-## 两条工作流
-
-### 工作流 A：参考素材二创（核心场景）
-
-```text
-① 上传参考视频 → ② 系统解析 → ③ 勾选变量 → ④ 设变体数
-                                                  ↓
-⑧ 谱系入库 ← ⑦ 双守卫校验 ← ⑥ 审核标记 ← ⑤ 批量生成
-```
-
-| 步骤 | 你看到 | 你做什么 | 系统做什么 |
-|------|--------|----------|------------|
-| ① 上传 | 拖入一条已跑通的视频 | 拖入 Master Asset | 提取关键帧、音频、时长 |
-| ② 解析 | 系统拆出的镜头表 + Hook 结构 + 文案 + BGM | 确认解析结果，可修正 | VLM 切分镜头、识别 Hook、转录文案、分析节奏 |
-| ③ 勾选变量 | 六维变量矩阵，每项可开关 | 勾「换场景、换模特、换 Hook」，锁「产品、卖点」 | 生成变量组合空间，显示预估变体数 |
-| ④ 设变体数 | 滑块：生成 10 / 30 / 100 条 | 选择数量与成本档位 | 计算预估成本，锁定预算 |
-| ⑤ 生成 | 变体队列，逐条进度 | 等待或离开 | 分层变量生成：视觉/人物/文案/节奏/音频 |
-| ⑥ 审核 | 网格视图，可播放可标记 | 快速过一遍，标记 👍/👎 | 记录 outcome |
-| ⑦ 守卫 | 每条变体显示「保真 ✅ · 去重 ✅」 | 复核未通过的少数变体 | 保真守卫 + 去重守卫双重校验 |
-| ⑧ 入库 | 「已入库 27 条变体」 | 一键入库 | 建立谱系关系，打标签，写知识层 |
-
-### 工作流 B：从零生成（补充场景）
-
-适用于新品上架、没有参考素材时。上传 SKU 表 + 商品图 → 选模板 → 批量生成。流程与工作流 A 类似，但起点是商品图和模板，不是参考视频。
-
-> 想直接看一个完整案例？跳到 [Dapur Ibu 的一条爆款如何变成三十条](#案例dapur-ibu-的一条爆款如何变成三十条)。
+**哪个 Master 衍生了最多好评变体，它就是最值钱的资产。** 每次解析、生成、审核都会自动写入知识层（raw → topic → rule），跑通的配方可注册为 versioned Skill，驱动下一轮生产决策。
 
 ---
 
 ## 案例：Dapur Ibu 的一条爆款如何变成三十条
 
-> **背景**：Dapur Ibu 的 **Sambal Matah** 辣椒酱在 TikTok Indonesia 上跑出一条爆款——酱汁倾倒 + 慢动作拉丝 + 试吃反应，播放 **50 万**，带货 **2000 单**。想复用，但直接重发会被限流，人工改又太慢。请剪辑师改一条 30 分钟，一周改不出 20 条。
+> **背景**：Dapur Ibu 的 **Sambal Matah** 辣椒酱在 TikTok Indonesia 上跑出一条爆款——酱汁倾倒 + 慢动作拉丝 + 试吃反应，播放 **50 万**，带货 **2000 单**。想复用，但直接重发会被限流，人工改又太慢。
 
-### ① 上传 Master Asset
+### ① 上传 Master Asset → ② 解析
 
-运营把这条爆款拖进工作台。系统自动解析出：
+运营把爆款拖进工作台。VLM 自动解析出：4 个镜头共 11 秒、Hook 结构、印尼语文案、120 BPM BGM、快切节奏（平均 2.7 秒/镜头）。
 
-```text
-镜头结构（4 个镜头，共 11 秒）
-├── 镜头 1 [0:00-0:03] 酱汁倾倒特写（Hook）
-├── 镜头 2 [0:03-0:06] 慢动作拉丝
-├── 镜头 3 [0:06-0:09] 产品包装特写
-└── 镜头 4 [0:09-0:11] 试吃反应 + CTA
-
-文案（Bahasa Indonesia）
-  "Sambal Matah segar, pedasnya nampol! Coba sekarang."
-BGM   轻快印尼民谣，120 BPM
-节奏  快切，平均 2.7 秒/镜头
-```
-
-### ② 勾选变量 → 设变体数
-
-运营勾选：
+### ③ 勾选变量 → 设变体数
 
 ```text
 ✅ 换场景   厨房台面 → 餐厅 / 户外野餐 / 办公室（3 种）
 ✅ 换模特   印尼女性 A → B / C（2 种）
 ✅ 换 Hook  倾倒 → 拉丝 / 试吃 / 开盖（4 种）
-✅ 换 BGM   轻快民谣 → 流行 / 电子（3 种）
 🔒 锁定产品 瓶身外观、标签、品牌色
 🔒 锁定卖点 "segar"（新鲜）、"pedasnya nampol"（辣得过瘾）
 ```
 
-系统计算变量组合空间 = 3 × 2 × 4 × 3 = **72 种**。运营选择生成 **30 条**，系统按「最大差异度优先」策略采样。
+组合空间 = 3 × 2 × 4 = **72 种**，采样生成 **30 条**，预估成本 **$4.50**（economy 档更低，$0.12/条起）。
 
-预估成本：**$4.50**（30 条 × $0.15）。
+### ④ 批量生成 → 双守卫 → 审核入库
 
-### ③ 批量生成 → 双守卫校验
+30 条变体逐条过守卫：保真全部通过（一致度 > 0.92）；去重 27 条通过，3 条相似度过高自动拦截。运营网格审核 👍 18 条入库，建立谱系。
 
-30 条变体生成完毕，双守卫自动校验：
+### ⑤ 复利
 
-- **保真守卫**：30 条全部通过——产品外观、标签、品牌色与 Master 一致度 > 0.92。
-- **去重守卫**：27 条通过（视觉相似度 < 0.65 阈值）；**3 条被拦截**（场景变化不够大，与 V07 相似度 0.78），自动进入重试队列。
-
-### ④ 审核 → 谱系入库
-
-运营在网格视图快速过一遍：
-
-- 👍 标记 **18 条**：V02（餐厅场景 + 模特 B + 拉丝 Hook）最有食欲感；V11（野餐场景 + 试吃 Hook）氛围最贴合。
-- 👎 标记 **9 条**：办公室场景光线偏冷，酱汁颜色失真。
-
-18 条好评入库，建立谱系：
-
-```text
-Master: Sambal Matah 爆款 (播放 50万 · 带货 2000单)
-├── V02 · 餐厅·B·拉丝 → 播放 12万 · 带货 680单 ⭐
-├── V11 · 野餐·A·试吃 → 播放 9万 · 带货 420单
-└── ... 共 18 条通过审核
-```
-
-### ⑤ 复利：下一个 Master 更聪明
-
-三周后，Sambal Matah 的谱系里，**V02（餐厅场景 + 拉丝 Hook）** 成为新的高复用变体。运营想推新品 **Sambal Bawang** 时，系统推荐：
-
-> 「V02 的 Hook 结构（拉丝）+ 餐厅场景，在 Sambal 品类下历史好评率 78%，建议复用为 Master 模板。」
-
-运营一键把 V02 设为新 Master 的参考，新的 30 条变体直接继承最优配置。
-
-### 这个案例说明了什么
+三周后 V02（餐厅 + 模特 B + 拉丝 Hook）成为谱系里最高复用变体。推新品 Sambal Bawang 时，知识层推荐：「V02 的 Hook 结构 + 餐厅场景，在 Sambal 品类下历史好评率 78%，建议复用为 Master 模板。」
 
 | 维度 | 传统二创 | Video Batch ID |
 |------|----------|----------------|
 | 30 条变体耗时 | 15 小时（剪辑师） | **约 25 分钟** |
-| 30 条变体成本 | ≈ $150（人工） | **$4.50（算力）** |
-| 通过平台审核 | 靠经验，常被判重 | **双守卫确保 90% 通过** |
-| 核心素材价值 | 用一次就浪费 | **一个 Master 衍生 30 条，持续复利** |
-| 下一个 Master | 重新摸索 | **从谱系里继承最优配置** |
+| 30 条变体成本 | ≈ $150（人工） | **$4.50（算力，economy 档 $3.60）** |
+| 通过平台审核 | 靠经验，常被判重 | **双守卫拦截废片** |
+| 下一个 Master | 重新摸索 | **从谱系与 Skill 继承最优配置** |
+
+---
+
+## AI-Native 架构
+
+> **Owner 裁决**：VBID 是**原生态 AI-Native 项目**，未来以 `packages/video-distiller/` 形态**托管融合进 [ai-native-dam](https://github.com/vfvincentwong2026/ai-native-dam)**。因此每一行代码、每一张表、每一个端点都按「即将被 DAM 托管」的标准写。完整方案见 [docs/06](docs/06_AI_native_改造方案.md)，对接验证见 [docs/07](docs/07_A2A_对接验证报告.md)。
+
+**三条铁律**
+
+1. **MCP-first** — 全部能力先定义为 MCP 工具契约（`POST /mcp`，JSON-RPC），SPA、A2A Agent、任何 MCP 客户端共用同一操作面；不留私有端点（REST 仅保留摄入/演示，已标 deprecated）。
+2. **治理不自建** — Rights / Approval / Audit 语义照抄 DAM 的 policies 与 shared-schema；本地 SQLite 8 张表（assets / tasks / rights / approvals / audit_log / knowledge_entries / skills / skill_versions）与 DAM Postgres migrations 对齐，平移零改动。
+3. **知识与 Skill 从第一天沉淀** — 解析、生成、审核自动写知识层（raw/topic/rule/manual/qa 五层）；跑通的配方过门槛（≥3 任务 / ≥8 变体 / 👍率 ≥60%）注册为 versioned Skill。
+
+```mermaid
+flowchart TB
+    subgraph clients["操作面（全部经 MCP / A2A）"]
+        SPA[Web 工作台<br/>apps/web · MCP 客户端]
+        AGENT[Kimi / Claude / 客户 Agent<br/>A2A message/send]
+    end
+    subgraph vbid["Video Batch ID 执行体"]
+        MCP[POST /mcp<br/>15 工具契约 · 两段式审批门]
+        A2A[A2A<br/>Agent Card + 只读委派]
+        GOV[治理闸门<br/>governance · approvals · audit]
+        PIPE[pipeline<br/>解析→矩阵→生成→守卫]
+        KNOW[知识层<br/>raw/topic/rule/manual/qa + Skills]
+        SQLite[(SQLite<br/>8 张治理对齐表)]
+    end
+    VLM[VLM 解析<br/>OpenAI 兼容 · gpt-4o-mini 默认]
+    GEN[视频生成<br/>OpenRouter · economy/standard 两档]
+
+    SPA --> MCP
+    AGENT --> A2A --> MCP
+    MCP --> GOV --> PIPE
+    PIPE --> VLM
+    PIPE --> GEN
+    PIPE --> KNOW
+    GOV --> SQLite
+    KNOW --> SQLite
+```
+
+### MCP 工具面（15 个）
+
+读写一律经 `POST /mcp`（JSON-RPC，MCP 协议版本 `2024-11-05`）。`gated: true` 的工具走**两段式审批**：首次调用返回 `-32042` + `approval_token`，以相同参数携带 token 二次调用才执行（令牌一次性、10 分钟有效，金额/余量/档位全展示）。
+
+| 工具 | 风险 | 审批 | 作用 |
+|------|------|------|------|
+| `search_assets` | low | — | 检索素材/变体（关键词、类型、状态） |
+| `get_lineage` | low | — | 谱系树：Master + 全部变体 + 审核状态 |
+| `parse_master` | low | — | VLM/结构解析 + 关键帧抽取 |
+| `suggest_matrix` | low | — | 智能变量推荐 |
+| `check_use` | low | — | 渠道/地区/授权检查 |
+| `get_analysis` | low | — | 关键内容分析 |
+| `create_task` | medium | ✅ | 创建生成任务 |
+| `review_variant` | low | — | 审核 👍/👎（沉淀 rule 层知识） |
+| `record_usage` | medium | ✅ | 发布用途登记 |
+| `write_knowledge` | medium | ✅ | manual/qa 层知识写入 |
+| `submit_generation` | **high** | ✅ | 真实生成（cost-incurring，必批，展示金额/条数/余量/档位） |
+| `register_skill` | **high** | ✅ | 跑通配方注册为 versioned skill |
+| `list_tasks` | low | — | 任务队列列表 |
+| `search_knowledge` | low | — | 知识分层检索 |
+| `list_skills` | low | — | Skill 资产列表（含版本与 provenance） |
+
+### A2A 对接
+
+- `GET /.well-known/agent.json` — Agent Card（发现契约）
+- `POST /a2a/message/send` — 最小委派：帮助查询、任务状态、二创分析提案（**gated 只读**，委派绝不自动执行，零副作用有测试断言）
+- `GET /a2a/tasks/:contextId` — 状态迁移历史
+
+### 生成档位
+
+| 档位 | 模型 | 时长 | 分辨率 | 音频 | 单价 |
+|------|------|------|--------|------|------|
+| `economy` | `google/veo-3.1-lite` | 4s | 720p | 无 | **$0.12/条** |
+| `standard` | `alibaba/wan-2.7` | 5s | 720p | 有 | $0.50/条 |
 
 ---
 
@@ -210,104 +208,24 @@ Master: Sambal Matah 爆款 (播放 50万 · 带货 2000单)
 
 | 能力 | 对你意味着什么 |
 |------|----------------|
-| **参考视频解析** | 上传一条爆款，系统自动拆出镜头、Hook、文案、节奏、BGM。 |
-| **变量矩阵控制** | 六维可独立开关：变什么、锁什么，一目了然。食品材质（通透、拉丝、光泽）支持细粒度控制。 |
-| **分层变体生成** | 视觉/人物/文案/节奏/音频分层处理，保持核心不变。 |
-| **保真守卫** | 产品外观、品牌元素、核心卖点、颜色与通透度与 Master 一致度自动校验。 |
-| **去重守卫** | 视觉 + 音频三重检测，针对 TikTok Indonesia / Shopee 判重特征优化。 |
+| **参考视频解析** | 上传一条爆款，VLM 自动拆出镜头、Hook、文案、节奏、BGM。 |
+| **变量矩阵控制** | 六维可独立开关；食品材质（通透、拉丝、光泽）细粒度控制。 |
+| **MCP 工具面** | 15 个工具，任何 MCP 客户端（Kimi / Claude Desktop / 客户 Agent）不看我们的 UI 也能完成全链路。 |
+| **两段式审批门** | 花钱的操作（生成/建任务/注册 Skill）先展示金额余量、人工确认后执行。 |
+| **A2A 委派** | 其他 Agent 可发任务来查询状态、拿二创提案，但绝不能替你点「确认付款」。 |
+| **双守卫** | 保真 + 去重，未通过不混入合格队列。 |
 | **变体谱系** | 每个 Master 衍生了哪些变体、哪条效果最好，一图看清。 |
-| **批量上传与 SKU 解析** | 工作流 B 用：拖一个 CSV，得到一条队列。 |
-| **品类专属模板** | 食品有「热气/拉丝/倾倒/开箱」配方，美妆有「上手试色/前后对比」。 |
-| **实时成本预估** | 生成前知道价格，队列里看到真实花费。 |
-| **可检索的素材库** | 按品类、平台、Hook、语言、效果评分检索。 |
-| **OpenAI 兼容 API** | `POST /v1/videos/generations` 与 `/v1/videos/variations`。 |
-| **多语言 TTS** | 开箱支持印尼语（`id-ID-ArdiNeural`、`id-ID-GadisNeural`）。 |
-| **公网试用入口** | Cloudflare Tunnel + Access — 可分享域名，SSO/OTP 门禁。 |
+| **知识层** | 五层知识自动沉淀 + 检索，Master 价值榜驱动下一轮生产。 |
+| **Skill 注册** | 跑通的配方带版本/权限/溯源注册，可复用可审计。 |
+| **实时成本预估** | 生成前知道价格，审批窗看到 key 余量。 |
 
----
-
-## 架构
-
-```mermaid
-flowchart TB
-    A[客户端 / 运营界面] --> B[Cloudflare Tunnel<br/>+ Access]
-    B --> C[网关<br/>apps/web · apps/api]
-    C --> D[Cloudflare D1<br/>任务状态 · 成本]
-    C --> E[本地队列<br/>SQLite / Redis]
-
-    E --> F[参考解析层<br/>Qwen2.5-VL · Whisper]
-    F --> G[变量控制层<br/>Variable Matrix]
-    G --> H[变体生成层<br/>Wan 2.2 I2V/V2V · ControlNet · IP-Adapter]
-    H --> I[合成层<br/>reel-kit · Edge-TTS]
-    I --> J[双守卫<br/>Fidelity + Dedup]
-    J --> K[素材谱系库<br/>Argus 索引 + FTS5]
-    K --> C
-    K --> L[知识层<br/>Master 价值 · 变体效果]
-    L --> C
-```
-
-**关键决策**
-
-- 参考解析是入口，不是可选步骤。没有解析就没有变量矩阵，没有变量矩阵就退化成「重新生成」。
-- 双守卫是硬门槛。未通过守卫的变体不进入合格队列，宁可少产出，不可让废片混入。
-- 谱系是素材库的核心视图，不是附加功能。用户看素材库的第一眼应该是「哪些 Master 最值钱」。
-- 工作流 A（二创）优先于工作流 B（从零生成）。MVP 先跑通二创，因为痛点更尖锐。
-- MVP 不引入对象存储。资产落在本地磁盘，通过同一 Tunnel 回传。零 Egress 成本。
-- D1 是任务状态的唯一真相源。本地 API 通过 REST 直写 D1，无需 Workers。
-
-### 部署模式
-
-| 模式 | 用途 | 栈 | 公网 |
-|------|------|----|------|
-| `local` | 开发、测试 | 仅本地服务 | ❌ |
-| `tunnel` | MVP 演示、种子用户试用 | 本地服务 + Cloudflare Tunnel + Access + D1 | ✅ |
-| `cloud` | L2 平台化（未来） | 云服务器 + Cloudflare Queues + R2 | ✅ |
-
-### 界面概览
-
-| 界面 | 用途 |
-|------|------|
-| 工作台首页 | 今日产出、Master 数量、变体通过率、花费、最近好评变体 |
-| 参考解析页 | 上传参考视频，展示镜头表、Hook 结构、文案、BGM，可修正 |
-| 变量矩阵页 | 六维开关，实时显示变量组合空间与预估成本 |
-| 任务队列 | 逐变体进度、守卫校验状态、实时花费 |
-| 审核页 | 网格视图、播放、评分、守卫结果、单条重绘 |
-| 素材谱系 | Master → 变体的树形视图，按效果评分排序 |
-| 素材库 | 搜索框 + 筛选（品类、平台、Hook、评分），复用按钮 |
-| 知识层（内部） | Master 价值榜、变体成功率、变量组合效果分析 |
-
-界面截图见 [`docs/screenshots/`](docs/screenshots/)（v2 设计系统见 [`docs/screenshots/v2-ui/`](docs/screenshots/v2-ui/)）。
-
----
-
-## 技术栈
-
-| 层 | 组件 | 作用 |
-|----|------|------|
-| 入口 | Cloudflare Tunnel | 公网 HTTPS 入口，不开端口 |
-| 门禁 | Cloudflare Access | 试用用户 SSO / OTP 门禁 |
-| 状态 | Cloudflare D1 | 任务状态、成本记录 |
-| 参考解析 | Qwen2.5-VL / InternVL2.5 + Whisper | 镜头切分、Hook 识别、文案转录、节奏分析 |
-| 变量控制 | 自研 `packages/variable-matrix` | 六维变量组合与采样 |
-| 变体生成 | Wan 2.2 I2V/V2V + ComfyUI ControlNet / IP-Adapter | 视觉、人物、场景变量 |
-| 人物变体 | LivePortrait / IP-Adapter FaceID | 换模特、换表情，保持动作 |
-| 文案变体 | Sahabat AI（印尼语）+ Edge-TTS | Hook 改写、重新口播 |
-| 节奏变体 | ffmpeg + 时间重映射 | 时长、剪辑密度调整 |
-| 保真守卫 | CLIP + GroundingDINO + 颜色/通透度校验 | 产品区域检测 + 语义与材质一致性 |
-| 去重守卫 | pHash + CLIP 距离 + Chromaprint | 视觉 / 音频三重去重 |
-| 素材索引 | Argus 风格扫描器 + SQLite FTS5 | 视觉元数据、标签、全文检索 |
-| 合成 | reel-kit | HTML 模板 → MP4 装配 |
-| 网关 | free-multimodal-proxy | OpenAI 兼容入口路由 |
-| 路由 | pixhub | Provider 适配器、降级链、档位路由 |
-| 自研胶水 | `apps/api`、`apps/web`、`packages/*` | 变量矩阵、双守卫、谱系追踪 |
-
-视频模型的商用许可见下文 [模型许可证](#模型许可证)。
+界面截图见 [`docs/screenshots/`](docs/screenshots/)。
 
 ---
 
 ## 快速开始
 
-**环境要求** — Node.js 20+（`apps/api` 直接运行 `.ts`，需要支持原生 TypeScript 类型剥离的 Node 版本）、pnpm 9、ffmpeg / ffprobe。
+**环境要求** — Node.js 20+（`apps/api` 直接运行 `.ts`，依赖原生 TypeScript 类型剥离；SQLite 走 `node:sqlite`）、pnpm 9、ffmpeg / ffprobe（无系统 ffmpeg 时可设 `VBID_FFMPEG` / `VBID_FFPROBE` 指向任意静态二进制）。
 
 ```bash
 git clone https://github.com/vfvincentwong2026/video-batch-id.git
@@ -320,23 +238,29 @@ pnpm --filter @vbid/api start
 | 服务 | 地址 |
 |------|------|
 | Web 工作台（由 API 静态托管 `apps/web`） | http://localhost:8000 |
+| MCP 端点 | `POST http://localhost:8000/mcp` |
+| Agent Card | http://localhost:8000/.well-known/agent.json |
 | 健康检查 | http://localhost:8000/healthz |
 
-> **规划中**：Docker Compose（`local` / `tunnel` / `gpu` profile）、`make d1-migrate` 与 Cloudflare Tunnel 一键部署尚未进入仓库。Tunnel 模式届时需在 Cloudflare Zero Trust 创建 Tunnel，并配置 `CLOUDFLARE_TUNNEL_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_D1_DATABASE_ID`、`CLOUDFLARE_API_TOKEN`。
+**端到端自验**（合成素材，真实 OpenRouter 生成，约 $0.12）：
+
+```bash
+node scripts/e2e-synth.cjs     # 摄入→审批→真实生成→产物落盘
+pnpm a2a:verify                # A2A 对接 13 项断言
+pnpm -r test                   # 全 workspace 测试
+```
 
 ### 素材视频不进仓库
 
-参考素材（Master Asset）和生成的变体视频**不提交到 Git**：体积大，且可能含客户或第三方素材的版权内容。请放在本地 `assets/` 目录，或自行管理的私有存储里。`assets/`、`Master Asset/` 以及 `*.mp4` / `*.mov` 均已在 `.gitignore` 中忽略。
+参考素材（Master Asset）和生成的变体视频**不提交到 Git**。`assets/`、`Master Asset/` 均已在 `.gitignore` 中忽略。
 
-### 首次使用引导（工作流 A：二创）
+### 首次使用引导
 
-1. 打开工作台 → 点击 **上传参考视频**
-2. 等待解析 → 查看镜头表、Hook 结构、文案、BGM → 确认或修正
-3. 在变量矩阵页勾选「变什么、锁什么」→ 查看变量组合空间
-4. 设变体数量与成本档位 → 查看预估成本 → 点击 **生成**
-5. 观察变体队列 → 每条显示守卫校验状态
-6. 在审核页标记 👍/👎 → 一键入库
-7. 打开 **素材谱系** → 查看 Master 衍生关系
+1. 打开工作台 → **scan-dir** 指向素材目录（或拖入参考视频）
+2. 等待 VLM 解析 → 查看镜头表、Hook 结构、文案、BGM
+3. 变量矩阵页勾选「变什么、锁什么」→ 查看组合空间
+4. 建任务 → **审批窗确认金额与档位** → 生成
+5. 审核页标记 👍/👎 → 入库；谱系/知识页看复利
 
 ---
 
@@ -346,20 +270,16 @@ pnpm --filter @vbid/api start
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `VBID_PROFILE` | `local` / `tunnel` / `cloud` | `local` |
-| `VBID_STATE_BACKEND` | `d1` 或 `sqlite` | Tunnel 模式下为 `d1` |
-| `VBID_ASSET_DIR` | 素材存储目录 | `./assets` |
-| `VBID_VLM_MODEL` | 参考解析用的 VLM（vlm-api provider；OpenAI 兼容协议） | `gpt-4o-mini` |
-| `VBID_VLM_API_KEY` | 启用 vlm-api 语义解析的 key（不设置则回退 ffmpeg-shotcut） | — |
-| `VBID_VLM_BASE_URL` | OpenAI 兼容入口（官方默认 / 中转 relay） | `https://api.openai.com/v1` |
-| `VBID_GEN_MODEL` | 变体生成主模型 | `wan2.2-ti2v-5b` |
+| `VBID_VLM_MODEL` | 参考解析 VLM（OpenAI 兼容协议） | `openai/gpt-4o-mini` |
+| `VBID_VLM_API_KEY` | VLM key（不设则回退 ffmpeg 结构解析） | — |
+| `VBID_VLM_BASE_URL` | OpenAI 兼容入口 | `https://openrouter.ai/api/v1` |
+| `VBID_GEN_API_KEY` | 真实视频生成 key（不设则 submit_generation 不可用） | 回退 VLM key |
+| `VBID_FFMPEG` / `VBID_FFPROBE` | 媒体探测二进制路径（无系统 ffmpeg 时） | PATH 探测 |
 | `VBID_FIDELITY_THRESHOLD` | 保真守卫阈值 | `0.92` |
 | `VBID_DEDUP_THRESHOLD` | 去重守卫相似度阈值 | `0.65` |
-| `VBID_INDEX_BACKEND` | `sqlite-fts` / `pgvector` | `sqlite-fts` |
-| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare 账户 | — |
-| `CLOUDFLARE_D1_DATABASE_ID` | D1 数据库 ID | — |
-| `CLOUDFLARE_API_TOKEN` | 具备 D1 读写权限的 API Token | — |
-| `CLOUDFLARE_TUNNEL_TOKEN` | Tunnel Token | — |
+| `VBID_ASSET_DIR` | 素材存储目录 | `./assets` |
+
+> **托管后**：治理平面唯一事实源切换为 ai-native-dam（Postgres），本机 SQLite 退役；TLS 与 Bearer 鉴权由 DAM 部署层终结。差距清单见 [docs/07 第四节](docs/07_A2A_对接验证报告.md)。
 
 ---
 
@@ -368,42 +288,41 @@ pnpm --filter @vbid/api start
 ```text
 video-batch-id/
 ├── apps/
-│   ├── api/                 # 网关胶水：资产/任务 REST、SQLite 状态层、静态托管 web
-│   └── web/                 # 运营工作台（解析、矩阵、审核、谱系），零构建
+│   ├── api/                 # 执行体：POST /mcp（15 工具）· A2A · REST 摄入/演示 · SQLite 治理层
+│   └── web/                 # 运营工作台——纯 MCP 客户端（六页读路径全走 /mcp）
 ├── packages/
-│   ├── reference-parser/    # 参考视频解析：镜头、Hook、文案、节奏（ffmpeg / vlm-api）
+│   ├── shared-schema/       # MCP 工具契约 · 档位定价 · 手写校验器（Zod 版随 DAM 替换）
+│   ├── governance/          # 审批门/权限/审计语义（照抄 DAM，退役随托管）
+│   ├── reference-parser/    # 参考解析：ffmpeg 结构 / vlm-api 语义 两 provider
 │   ├── variable-matrix/     # 六维变量组合与采样
-│   ├── pipeline/            # 工作流 A 编排
-│   ├── gen-provider/        # 生成层 provider 适配器
-│   └── media-probe/         # ffprobe 媒体探测
-├── docs/                    # PM 研究、验收报告、生成层对比、截图
-├── assets/                  # 生成资产与 Master 库（git 忽略，不进仓库）
-├── .env.example
-├── pnpm-workspace.yaml
-└── LICENSE
+│   ├── pipeline/            # 工作流 A 编排（解析→矩阵→生成→守卫）
+│   ├── gen-provider/        # 生成层 provider（mock / openrouter 两档）
+│   └── media-probe/         # ffprobe 探测 + 场景切分
+├── scripts/                 # a2a-verify · e2e-synth · verify-synth · find-assets
+├── docs/                    # PM 研究 · 验收 · 生成层对比 · AI-Native 方案 · A2A 验证
+└── pnpm-workspace.yaml
 ```
-
-规划中（尚未入库）：`packages/guards`、`packages/lineage`、`packages/cost-tracker`、`packages/asset-index`、`packages/template-engine`、`skills/`、`config/routes.yaml`、`migrations/d1/`、`docker-compose.yml`。
 
 ### 文档
 
 - [`docs/00_PM_研究结论与立项建议.md`](docs/00_PM_研究结论与立项建议.md)
 - [`docs/02_v0.1_交付与验收报告.md`](docs/02_v0.1_交付与验收报告.md)
 - [`docs/05_生成层_provider_三路对比.md`](docs/05_生成层_provider_三路对比.md)
+- [`docs/06_AI_native_改造方案.md`](docs/06_AI_native_改造方案.md) — 托管融合终态与三条铁律
+- [`docs/07_A2A_对接验证报告.md`](docs/07_A2A_对接验证报告.md) — 13/13 验证 + 遗留差距诚实清单
 
 ---
 
 ## 路线图
 
-| 版本 | 里程碑 | 部署 |
+| 版本 | 里程碑 | 状态 |
 |------|--------|------|
-| v0.1.0 | 参考视频解析 · 变量矩阵 v1 · 基础变体生成（视觉层） | `local` |
-| v0.2.0 | 保真守卫 · 去重守卫 · 变体谱系 v1 · Tunnel 模式 | `tunnel` |
-| v0.3.0 | 人物变量 · 文案变量（Sahabat AI + TTS）· 审核页 | `tunnel` |
-| v0.4.0 | 节奏变量 · 音频变量 · 分层合成 | `tunnel` |
-| v0.5.0 | 从零生成工作流 · 品类模板库 · SKU 批量入口 | `tunnel` |
-| v0.6.0 | 知识层 · Master 价值榜 · 变量组合效果分析 | `tunnel` |
-| v0.7.0 | pgvector 语义检索 · MCN 矩阵模式 · 云服务器部署 | `cloud` |
+| v0.1 | 参考解析 · 变量矩阵 · 基础生成 | ✅ |
+| v0.5 | MCP 工具面 · 治理闸门 · 知识层 | ✅ |
+| **AI-Native 改造（P0-P4）** | 契约对齐 DAM · SPA 切 MCP 客户端 · 学习闭环（Skill 门槛）· Agent Card + A2A 委派 · 端到端真实生成验证 | ✅ 2026-11-12 |
+| **托管融合** | 以 `packages/video-distiller/` 并入 [ai-native-dam](https://github.com/vfvincentwong2026/ai-native-dam)，SQLite → DAM Postgres，治理退役本地版 | 下一步 |
+| 表现回流 | record_usage 已就位，接 RedFox/OneAPI 投放数据连接器 → rule 层自动回流 | 规划中 |
+| 多执行体 | 节奏/音频变量分层生成 · 从零生成工作流 B · 品类模板库 | 规划中 |
 
 ---
 
@@ -413,10 +332,9 @@ video-batch-id/
 
 | 模型 | 许可证 | 商用说明 |
 |------|--------|----------|
-| Wan 2.2（T2V-A14B / TI2V-5B） | Apache 2.0 | 无收入门槛、无地区排除。主锚点。 |
-| LTX-Video / LTX-2.3 | LTX Open Weights | 年收入 $10M 以下免费商用；以上需付费许可。 |
-| HunyuanVideo | Tencent Community | 排除 EU / UK / 韩国；100M MAU 上限。 |
-| CogVideoX-5b | CogVideoX Community | 月活 100 万以下免费商用。 |
+| Wan 2.x（经 OpenRouter 路由） | Apache 2.0 | 无收入门槛、无地区排除。 |
+| Veo 3.1 Lite（economy 档，经 OpenRouter 路由） | 随 Google 条款 | 按 OpenRouter 商用条款执行。 |
+| gpt-4o-mini（VLM 解析） | 随 OpenAI 条款 | 按 OpenRouter 商用条款执行。 |
 
 第三方依赖与模型的许可证以其各自官方条款为准，分发或商用前必须逐项核对。
 
@@ -427,10 +345,6 @@ video-batch-id/
 ## 许可证
 
 本项目代码以 [MIT License](./LICENSE) 开源。第三方依赖、模型权重与素材的许可证以其各自条款为准，不随本项目的 MIT 授权一并授予。
-
-## 致谢
-
-构建于 ComfyUI、Qwen2.5-VL、pixhub、free-multimodal-proxy、reel-kit、voice-compute 之上。
 
 ---
 
@@ -443,60 +357,44 @@ video-batch-id/
 
 **Turn one proven video into a hundred usable variants — safely, controllably, at scale.**
 
-Focused on the Indonesian short-video e-commerce market (TikTok Indonesia, Shopee Video, local food & FMCG brands).
-
-The core pain: a winning asset can almost never be reused. Repost it and the platform throttles you. Hand it to an editor and each variation takes 30 minutes. Regenerate it from scratch and the product looks different, the selling point is lost, the local style breaks.
-
-Video Batch ID fills the gap: parse a reference video into a **Variable Matrix**, let the operator choose what to vary and what to lock, batch-generate variants, and validate every variant with a **Fidelity Guard** (product/brand/selling point + color/translucency intact) and a **Dedup Guard** (dissimilar enough to pass TikTok Indonesia / Shopee review).
+Focused on the Indonesian short-video e-commerce market (TikTok Indonesia, Shopee Video, local food & FMCG brands). **AI-Native by design**: every capability is exposed as an MCP tool contract (`POST /mcp`, 15 tools), the web UI is just one MCP client, governance (two-call approval for cost-incurring actions) mirrors the [ai-native-dam](https://github.com/vfvincentwong2026/ai-native-dam) contracts, and every parse/generate/review writes to a five-layer knowledge base — preparing the project to be hosted as a `video-distiller` capability package inside DAM.
 
 ### Core Concepts
 
-- **Variable Matrix** — six controllable dimensions: visual (including material properties like translucency, gloss, stretch), person, copy, rhythm, audio (including ASMR/material sounds), technical. Lock the core, vary the rest.
-- **Dual Guard** — Fidelity Guard (CLIP + GroundingDINO + color/translucency checks) and Dedup Guard (pHash + CLIP distance + audio fingerprint).
-- **Lineage** — every variant traces back to its Master Asset. The Master that spawns the most high-performing variants becomes the most valuable asset in the library.
+- **Variable Matrix** — six controllable dimensions (visual incl. food material properties, person, copy, rhythm, audio, technical). Lock the core, vary the rest.
+- **Dual Guard** — Fidelity Guard (CLIP + color/translucency) and Dedup Guard (pHash + CLIP distance + audio fingerprint).
+- **Lineage & Knowledge** — every variant traces back to its Master Asset; parsing, generation and review automatically distill into raw/topic/rule knowledge layers, and proven recipes graduate into versioned Skills (≥3 tasks / ≥8 variants / ≥60% 👍).
+- **MCP-first** — 15 tool contracts; gated tools (create_task, submit_generation, register_skill, …) require a two-call approval flow (`-32042` + `approval_token`) that always shows cost, tier and key balance before execution.
 
-### Two Workflows
+### Endpoints
 
-- **A. Reference-based variation (core):** upload reference → parse → select variables → set count → batch generate → dual-guard check → review → index to lineage.
-- **B. From-scratch generation (supplementary):** upload SKU sheet + product images → pick template → batch generate.
-
-### Case Study: How one Dapur Ibu hit became thirty variants
-
-Dapur Ibu's Sambal Matah TikTok Indonesia hit reached 500k views and sold 2,000 units. Reposting throttled; manual editing too slow. They uploaded the clip as a Master Asset. The system parsed 4 shots / 11 seconds / Indonesian copy / 120 BPM BGM. Operator varied: 3 scenes, 2 models, 4 hooks, 3 BGM tracks = 72 combinations, sampled 30. Generation cost: $4.50. Dual Guard: 30/30 passed fidelity, 27/30 passed dedup (3 re-queued). 18 rated good, indexed into lineage. Three weeks later, V02 (restaurant + model B + pull hook) became the new high-reuse template for the next SKU.
-
-### Key Features
-
-- Reference parsing (shot table, hook structure, transcript, BGM, rhythm)
-- Variable matrix with fine-grained food material controls
-- Layered generation (visual / person / copy / rhythm / audio)
-- Fidelity Guard + Dedup Guard tuned for Indonesian platforms
-- Lineage tree & Master value ranking
-- Native Bahasa Indonesia TTS (`id-ID-ArdiNeural`, `id-ID-GadisNeural`)
-- OpenAI-compatible API
-- Cloudflare Tunnel + Access for public trial (planned)
+| | |
+|---|---|
+| Web workbench | http://localhost:8000 |
+| MCP | `POST /mcp` (JSON-RPC, 15 tools) |
+| Agent Card | `GET /.well-known/agent.json` |
+| A2A | `POST /a2a/message/send` (read-only delegation, never auto-approves) |
+| Health | `/healthz` |
 
 ### Quick Start
 
 ```bash
 git clone https://github.com/vfvincentwong2026/video-batch-id.git
 cd video-batch-id
-cp .env.example .env          # all keys optional
+cp .env.example .env          # all keys optional; ffmpeg-struct parse + mock gen works without any
 pnpm install
 pnpm --filter @vbid/api start # http://localhost:8000
+node scripts/e2e-synth.cjs    # end-to-end self-check (synthetic asset, real OpenRouter gen, ~$0.12)
 ```
 
-Docker Compose profiles and the Cloudflare Tunnel deployment are planned and not yet in the repository.
+**Media files are not committed.** Master Assets and generated variants stay out of Git in the git-ignored `assets/` and `Master Asset/` directories.
 
-**Media files are not committed.** Master Assets and generated variants stay out of Git (large, and may contain client or third-party copyrighted footage); keep them in the git-ignored `assets/` directory or your own private storage.
+### Generation Tiers
 
-### Model Licenses
-
-| Model | License | Commercial note |
-|-------|---------|-----------------|
-| Wan 2.2 (T2V-A14B / TI2V-5B) | Apache 2.0 | No revenue cap, no region exclusion. Primary anchor. |
-| LTX-Video / LTX-2.3 | LTX Open Weights | Free under $10M annual revenue; paid above. |
-| HunyuanVideo | Tencent Community | Excludes EU/UK/South Korea; 100M MAU cap. |
-| CogVideoX-5b | CogVideoX Community | Free under 1M MAU. |
+| Tier | Model | Duration | Audio | Cost |
+|------|-------|----------|-------|------|
+| `economy` | `google/veo-3.1-lite` | 4s 720p | no | **$0.12/variant** |
+| `standard` | `alibaba/wan-2.7` | 5s 720p | yes | $0.50/variant |
 
 ### License
 
